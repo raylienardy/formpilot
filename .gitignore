@@ -1,0 +1,48 @@
+# ============================================================
+# FORMPILOT .gitignore
+# Kode 100% publik. Hanya data runtime & config mesin di-ignore.
+# ============================================================
+
+data/
+state/
+memory.db
+memory.db-journal
+chroma/
+*.log
+logs/
+models/
+!models/.gitkeep
+config/production.yaml
+config/*.local.yaml
+.env
+.env.*
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+playwright-report/
+test-results/
+*.webm
+*.har
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# PENGECUALIAN: contoh & konteks agen HARUS ter-commit
+!config/example.yaml
+!config/example.env
+!AGENTS.md
+!docs/
+!tasks/
+!README.md
+!models/.gitkeep
