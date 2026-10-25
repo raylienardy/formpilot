@@ -33,4 +33,39 @@ Memori kerja project. Setiap sesi WAJIB update di sini. Sesi berikutnya baca fil
 - Buat formpilot/memory/schema.py
 - Belum sentuh scraper/brain
 
+### 2026-10-25 — Sesi 1.5 (Fondasi Lanjutan)
+
+**Selesai:**
+- `docs/AGENT-BRIEF.md` — handbook lengkap untuk AI agent sesi baru
+- `docs/INDEX.md` — peta navigasi semua dokumen
+- `docs/ROADMAP.md` — fase, milestone, estimasi
+- `docs/PHASES.md` — step-by-step detail tiap fase
+- `docs/PRODUCT.md` — visi, target, use case, bayangan akhir
+- `docs/REQUIREMENTS.md` — hardware, software, skill, time
+- `AGENTS.md` — tambah section 11 (navigasi dokumen)
+- `LICENSE` — MIT, Copyright Raynato Lienardy 2026
+
+**Gagal:** (tidak ada)
+
+**Keputusan:** Dokumen fondasi v2 lengkap. Iterasi 1 siap dimulai.
+
+**Berikutnya (Sesi 2 — Fase 1.1):**
+- Baca `docs/AGENT-BRIEF.md` dan `docs/PHASES.md` (Fase 1) terlebih dulu
+- Mulai dari Fase 1.1: `pyproject.toml`
+- Ikuti urutan Fase 1.1 → 1.11 di `docs/PHASES.md`
+- Update STATE.md setiap sub-fase selesai
+
 **Blocker:** (tidak ada)
+
+---
+
+## Dokumen Referensi
+
+Fondasi v2 lengkap. Navigasi:
+
+- **Agent baru wajib baca:** `docs/AGENT-BRIEF.md`
+- **Peta dokumen:** `docs/INDEX.md`
+- **Roadmap:** `docs/ROADMAP.md`
+- **Step-by-step:** `docs/PHASES.md`
+- **Visi produk:** `docs/PRODUCT.md`
+- **Keperluan teknis:** `docs/REQUIREMENTS.md`

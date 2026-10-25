@@ -139,3 +139,19 @@ Lihat `docs/STATE.md`. Saat ini: tidak ada.
 3. Tandai PRD selesai jika berlaku
 4. Tunjukkan `git diff`
 5. Jangan commit tanpa izin user
+
+---
+
+## 11. NAVIGASI DOKUMEN
+
+Handbook lengkap untuk agent ada di `docs/AGENT-BRIEF.md`. Baca itu setiap sesi baru.
+
+Peta semua dokumen: `docs/INDEX.md`.
+
+Dokumen kunci:
+- `docs/AGENT-BRIEF.md` — handbook lengkap agent (WAJIB baca sesi baru)
+- `docs/PRODUCT.md` — visi, target, bayangan akhir project
+- `docs/ROADMAP.md` — fase, milestone, estimasi
+- `docs/PHASES.md` — step-by-step detail tiap fase
+- `docs/REQUIREMENTS.md` — hardware, software, skill
+- `docs/STATE.md` — status terkini
