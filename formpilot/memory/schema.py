@@ -7,13 +7,13 @@ All models are immutable-by-convention (do not mutate after creation).
 from __future__ import annotations
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 
-class FieldType(str, Enum):
+class FieldType(StrEnum):
     """Google Forms field types supported by FormPilot."""
 
     SHORT_TEXT = "short_text"  # Single line text
