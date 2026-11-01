@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <title>Multi-Page Sample Form</title>
+</head>
+<body>
+  <div role="main">
+    <!-- Page 1 -->
+    <div id="page1" data-page="1">
+      <div role="listitem">
+        <div role="heading" aria-level="3">Nama lengkap?</div>
+        <input type="text" aria-label="Jawaban Anda" />
+      </div>
+      <div role="button" id="next1" onclick="showPage(2)">Berikutnya</div>
+    </div>
+
+    <!-- Page 2 -->
+    <div id="page2" data-page="2" hidden>
+      <div role="listitem">
+        <div role="heading" aria-level="3">Pilih jurusan:</div>
+        <div role="radiogroup">
+          <div role="radio" aria-label="TI">TI</div>
+          <div role="radio" aria-label="SI">SI</div>
+        </div>
+      </div>
+      <div role="button" id="next2" onclick="showPage(3)">Berikutnya</div>
+    </div>
+
+    <!-- Page 3 (last) -->
+    <div id="page3" data-page="3" hidden>
+      <div role="listitem">
+        <div role="heading" aria-level="3">Saran:</div>
+        <textarea></textarea>
+      </div>
+      <div role="button" id="submit" onclick="submitForm()">Kirim</div>
+    </div>
+  </div>
+
+  <script>
+    function showPage(n) {
+      document.querySelectorAll('[data-page]').forEach(function(el) {
+        el.hidden = true;
+      });
+      var target = document.querySelector('[data-page="' + n + '"]');
+      if (target) { target.hidden = false; }
+    }
+    function submitForm() {
+      document.getElementById('submit').setAttribute('data-submitted', 'true');
+    }
+  </script>
+</body>
+</html>

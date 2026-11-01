@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <title>Validation Sample Form</title>
+</head>
+<body>
+  <div role="main">
+    <div role="listitem">
+      <div role="heading" aria-level="3">
+        Nama wajib?
+        <span class="freebirdFormviewerComponentsQuestionBaseRequiredAsterisk">*</span>
+      </div>
+      <input type="text" id="required-input" aria-label="Jawaban Anda" />
+    </div>
+
+    <div id="error-alert" role="alert" hidden>
+      Pertanyaan ini wajib diisi
+    </div>
+
+    <div role="button" onclick="validate()">Berikutnya</div>
+  </div>
+
+  <script>
+    function validate() {
+      var input = document.getElementById('required-input');
+      var alert = document.getElementById('error-alert');
+      if (!input.value) {
+        alert.hidden = false;
+      } else {
+        alert.hidden = true;
+      }
+    }
+  </script>
+</body>
+</html>

@@ -97,5 +97,149 @@ def test_url_and_page_number_preserved(page) -> None:
     """ExtractedForm carries url and page_number."""
     result = extract_questions(page, page_number=3)
     assert result.page_number == 3
-    # url from set_content is 'about:blank' or similar
     assert isinstance(result.url, str)
+
+
+# ---------------------------------------------------------------------------
+# Regression tests for Sesi 3 known limitation: _is_required() bug
+# ---------------------------------------------------------------------------
+
+
+def test_required_detected_via_google_forms_asterisk_class() -> None:
+    """Bug fix: _is_required() must detect Google Forms modern asterisk span."""
+    html = """
+    <!DOCTYPE html>
+    <html><body>
+      <div role="listitem">
+        <div role="heading" aria-level="3">
+          Pertanyaan wajib:
+          <span class="freebirdFormviewerComponentsQuestionBaseRequiredAsterisk">*</span>
+        </div>
+        <input type="text" />
+      </div>
+      <div role="button">Kirim</div>
+    </body></html>
+    """
+    playwright = sync_playwright().start()
+    browser = playwright.chromium.launch(headless=True)
+    page = browser.new_context().new_page()
+    try:
+        page.set_content(html, wait_until="domcontentloaded")
+        result = extract_questions(page)
+        assert len(result.questions) == 1
+        assert result.questions[0].required is True
+    finally:
+        browser.close()
+        playwright.stop()
+
+
+def test_required_detected_via_aria_label() -> None:
+    """Bug fix: _is_required() must detect aria-label 'Wajib'."""
+    html = """
+    <!DOCTYPE html>
+    <html><body>
+      <div role="listitem">
+        <div role="heading" aria-level="3">Pertanyaan?</div>
+        <span aria-label="Wajib">*</span>
+        <input type="text" />
+      </div>
+      <div role="button">Kirim</div>
+    </body></html>
+    """
+    playwright = sync_playwright().start()
+    browser = playwright.chromium.launch(headless=True)
+    page = browser.new_context().new_page()
+    try:
+        page.set_content(html, wait_until="domcontentloaded")
+        result = extract_questions(page)
+        assert len(result.questions) == 1
+        assert result.questions[0].required is True
+    finally:
+        browser.close()
+        playwright.stop()
+
+
+def test_required_false_when_no_markers() -> None:
+    """Non-required question should stay required=False."""
+    html = """
+    <!DOCTYPE html>
+    <html><body>
+      <div role="listitem">
+        <div role="heading" aria-level="3">Pertanyaan opsional</div>
+        <input type="text" />
+      </div>
+      <div role="button">Kirim</div>
+    </body></html>
+    """
+    playwright = sync_playwright().start()
+    browser = playwright.chromium.launch(headless=True)
+    page = browser.new_context().new_page()
+    try:
+        page.set_content(html, wait_until="domcontentloaded")
+        result = extract_questions(page)
+        assert result.questions[0].required is False
+    finally:
+        browser.close()
+        playwright.stop()
+
+
+# ---------------------------------------------------------------------------
+# Regression test for Sesi 3 known limitation: total_pages_estimate always null
+# ---------------------------------------------------------------------------
+
+
+def test_total_pages_from_indonesian_text() -> None:
+    """Bug fix: get_total_pages must parse 'Halaman X dari Y'."""
+    html = """
+    <!DOCTYPE html>
+    <html><body>
+      <div>Halaman 1 dari 5</div>
+      <div role="listitem">
+        <div role="heading" aria-level="3">Test?</div>
+        <input type="text" />
+      </div>
+      <div role="button">Berikutnya</div>
+    </body></html>
+    """
+    playwright = sync_playwright().start()
+    browser = playwright.chromium.launch(headless=True)
+    page = browser.new_context().new_page()
+    try:
+        page.set_content(html, wait_until="domcontentloaded")
+        result = extract_questions(page)
+        assert result.total_pages_estimate == 5
+    finally:
+        browser.close()
+        playwright.stop()
+
+
+def test_total_pages_from_english_text() -> None:
+    """Bug fix: get_total_pages must parse 'Page X of Y'."""
+    html = """
+    <!DOCTYPE html>
+    <html><body>
+      <div>Page 2 of 4</div>
+      <div role="listitem">
+        <div role="heading" aria-level="3">Test?</div>
+        <input type="text" />
+      </div>
+      <div role="button">Next</div>
+    </body></html>
+    """
+    playwright = sync_playwright().start()
+    browser = playwright.chromium.launch(headless=True)
+    page = browser.new_context().new_page()
+    try:
+        page.set_content(html, wait_until="domcontentloaded")
+        result = extract_questions(page)
+        assert result.total_pages_estimate == 4
+    finally:
+        browser.close()
+        playwright.stop()
+
+
+def test_total_pages_none_when_not_present(page) -> None:
+    """If no page indicator, total_pages_estimate should be None."""
+    result = extract_questions(page)
+    # sample_form.html has no page indicator
+    assert result.total_pages_estimate is None

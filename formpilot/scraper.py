@@ -4,17 +4,21 @@ Responsibilities:
 - Open form URL
 - Extract questions per page (Google Forms has multiple pages)
 - Detect field types (short text, paragraph, radio, checkbox, dropdown, linear scale)
+- Navigate between pages (Next / Submit)
+- Detect validation errors
 - Detect whether current page is the last page
-- Detect questions with media (image/video)
+- Detect total page count from progress indicator
 
 Non-responsibilities:
-- Filling answers (Fase 2+)
-- Clicking Next/Submit (Fase 2+)
+- Filling answers (Fase 2+ / Fase 4+)
 - Calling Ollama (brain.py)
 - Reading/writing memory (memory/)
 """
 
 from __future__ import annotations
+
+import re
+from contextlib import suppress
 
 from playwright.sync_api import Page, sync_playwright
 
@@ -24,6 +28,7 @@ from formpilot.utils.logger import get_logger
 logger = get_logger("formpilot.scraper")
 
 DEFAULT_TIMEOUT_MS = 30000
+PAGE_TRANSITION_WAIT_MS = 600  # wait after clicking Next, for DOM update
 
 # Module-level singletons; managed by open_form() / close()
 _playwright = None
@@ -62,11 +67,6 @@ def open_form(url: str, headless: bool = True, timeout_ms: int = DEFAULT_TIMEOUT
 def extract_questions(page: Page, page_number: int = 1) -> ExtractedForm:
     """Extract questions from current page.
 
-    Google Forms DOM structure (as of 2026):
-    - Each question is in `div[role="listitem"]`
-    - Question text is in `div[role="heading"][aria-level="3"]`
-    - Field type detected by child elements
-
     Args:
         page: Playwright Page with form loaded.
         page_number: Current page number (1-indexed).
@@ -80,6 +80,10 @@ def extract_questions(page: Page, page_number: int = 1) -> ExtractedForm:
     questions: list[Question] = []
 
     for idx, item in enumerate(items):
+        if not item.is_visible():
+            logger.debug("Skipping listitem %d: not visible", idx)
+            continue
+
         text = _extract_question_text(item)
         if not text:
             logger.debug("Skipping listitem %d: empty text", idx)
@@ -111,38 +115,145 @@ def extract_questions(page: Page, page_number: int = 1) -> ExtractedForm:
     extracted = ExtractedForm(
         url=page.url,
         page_number=page_number,
+        total_pages_estimate=get_total_pages(page),
         questions=questions,
         is_last_page=is_last_page(page),
     )
 
     logger.info(
-        "Extracted %d questions (last_page=%s)",
+        "Extracted %d questions (last_page=%s, total_pages=%s)",
         len(questions),
         extracted.is_last_page,
+        extracted.total_pages_estimate,
     )
     return extracted
 
 
-def is_last_page(page: Page) -> bool:
-    """Check whether Submit button is present on this page.
+def click_next(page: Page) -> bool:
+    """Click 'Next' button and wait for page transition.
 
-    Google Forms shows 'Kirim' (Indonesian) or 'Submit' (English)
-    on the last page, and 'Berikutnya'/'Next' on earlier pages.
+    Returns:
+        True if Next button was found and clicked successfully.
+        False if no Next button (meaning we're on the last page).
     """
-    submit = page.locator(
+    next_btns = page.locator(
+        'div[role="button"]:has-text("Berikutnya"), '
+        'div[role="button"]:has-text("Next"), '
+        'div[role="button"]:has-text("Lanjutkan"), '
+        'div[role="button"]:has-text("Continue")'
+    ).all()
+
+    visible_btn = None
+    for btn in next_btns:
+        if btn.is_visible():
+            visible_btn = btn
+            break
+
+    if visible_btn is None:
+        logger.debug("No visible Next button found (last page?)")
+        return False
+
+    logger.debug("Clicking Next")
+    visible_btn.click()
+
+    # Wait for DOM to settle. Try networkidle first (for real forms),
+    # fall back to timeout (for JS-only pages like test fixtures).
+    with suppress(Exception):
+        page.wait_for_load_state("networkidle", timeout=2000)
+    page.wait_for_timeout(PAGE_TRANSITION_WAIT_MS)
+
+    logger.debug("Page transition complete")
+    return True
+
+
+def click_submit(page: Page) -> None:
+    """Click Submit button. Does not verify successful submission."""
+    submit_btns = page.locator(
         'div[role="button"]:has-text("Kirim"), '
         'div[role="button"]:has-text("Submit"), '
         'div[role="button"]:has-text("Send")'
-    )
-    return submit.count() > 0 and submit.first.is_visible()
+    ).all()
+
+    visible_btn = None
+    for btn in submit_btns:
+        if btn.is_visible():
+            visible_btn = btn
+            break
+
+    if visible_btn is None:
+        raise RuntimeError("No Submit button found on this page")
+
+    logger.info("Clicking Submit")
+    visible_btn.click()
+    with suppress(Exception):
+        page.wait_for_load_state("networkidle", timeout=5000)
+
+
+def has_validation_error(page: Page) -> str | None:
+    """Check if form shows a validation error after clicking Next.
+
+    Returns:
+        Error message string if found, None otherwise.
+    """
+    alerts = page.locator('div[role="alert"]').all()
+    for alert in alerts:
+        if alert.is_visible():
+            msg = alert.inner_text().strip()
+            if msg:
+                logger.warning("Validation error detected: %s", msg[:100])
+                return msg
+
+    # Fallback: search for common error text
+    error_patterns = [
+        "This is a required question",
+        "Pertanyaan ini wajib diisi",
+        "Wajib diisi",
+        "Required question",
+    ]
+    for pattern in error_patterns:
+        locator = page.locator(f'text="{pattern}"')
+        if locator.count() > 0 and locator.first.is_visible():
+            logger.warning("Validation error text found: %s", pattern)
+            return pattern
+
+    return None
+
+
+def get_total_pages(page: Page) -> int | None:
+    """Estimate total page count from 'Page X of Y' or 'Halaman X dari Y' text.
+
+    Returns:
+        Total page count, or None if not detectable.
+    """
+    patterns = [
+        r"Halaman\s+\d+\s+dari\s+(\d+)",
+        r"Page\s+\d+\s+of\s+(\d+)",
+    ]
+    body_text = page.locator("body").inner_text()
+
+    for pattern in patterns:
+        match = re.search(pattern, body_text)
+        if match:
+            try:
+                return int(match.group(1))
+            except ValueError:
+                continue
+
+    return None
+
+
+def is_last_page(page: Page) -> bool:
+    """Check whether Submit button is present on this page."""
+    submit_btns = page.locator(
+        'div[role="button"]:has-text("Kirim"), '
+        'div[role="button"]:has-text("Submit"), '
+        'div[role="button"]:has-text("Send")'
+    ).all()
+    return any(btn.is_visible() for btn in submit_btns)
 
 
 def close(page: Page | None = None) -> None:
-    """Close browser and stop Playwright.
-
-    Safe to call multiple times. Pass page for API symmetry;
-    actual cleanup uses module-level globals.
-    """
+    """Close browser and stop Playwright. Safe to call multiple times."""
     global _playwright, _browser
 
     if _browser is not None:
@@ -172,33 +283,33 @@ def _extract_question_text(item) -> str:
     heading = item.locator('div[role="heading"]').first
     if heading.count() == 0:
         return ""
+
+    # Note: can't easily delete DOM nodes via locator; use text extraction with fallback
+    # Google Forms modern asterisk class and aria-labels are handled by _is_required()
+
     raw = heading.inner_text().strip()
-    # Google Forms appends "*" for required or "Wajib" marker
-    for marker in ["\n*", " *", "Wajib", "Required"]:
+    # Strip trailing markers
+    for marker in ["\n*", " *", "*\n", "Wajib", "Required"]:
         raw = raw.replace(marker, "")
-    return raw.strip()
+    raw = raw.rstrip("*").strip()
+    return raw
 
 
 def _detect_field_type(item) -> tuple[FieldType, list[str]]:
     """Inspect DOM inside item to detect field type + options."""
-    # Paragraph (multi-line)
     if item.locator("textarea").count() > 0:
         return FieldType.PARAGRAPH, []
 
-    # Short text
     if item.locator('input[type="text"]').count() > 0:
         return FieldType.SHORT_TEXT, []
 
-    # Radio / Linear Scale (both use role="radiogroup")
     radio_group = item.locator('div[role="radiogroup"]')
     if radio_group.count() > 0:
         options = _extract_options_from_group(radio_group.first, role="radio")
-        # Heuristic: linear scale has 5-11 short numeric options (1-5, 1-10)
         if 5 <= len(options) <= 11 and all(_looks_like_scale(o) for o in options):
             return FieldType.LINEAR_SCALE, options
         return FieldType.RADIO, options
 
-    # Checkbox
     checkbox_group = item.locator('div[role="group"]')
     if checkbox_group.count() > 0:
         checkboxes = item.locator('div[role="checkbox"]')
@@ -206,9 +317,8 @@ def _detect_field_type(item) -> tuple[FieldType, list[str]]:
             options = _extract_options_from_group(checkbox_group.first, role="checkbox")
             return FieldType.CHECKBOX, options
 
-    # Dropdown (listbox)
     if item.locator('div[role="listbox"]').count() > 0:
-        return FieldType.DROPDOWN, []  # options load on click; not extractable statically
+        return FieldType.DROPDOWN, []
 
     return FieldType.UNKNOWN, []
 
@@ -225,22 +335,39 @@ def _extract_options_from_group(group, role: str) -> list[str]:
 
 
 def _looks_like_scale(option: str) -> bool:
-    """True if option looks like a scale point (1, 2, 3, 'Sangat Setuju', etc)."""
+    """True if option looks like a scale point."""
     stripped = option.strip()
     if stripped.isdigit():
         return True
-    # Short labels are typical for scales
     return len(stripped) < 20
 
 
 def _is_required(item) -> bool:
-    """Check if question is marked required."""
-    # Method 1: aria-label="Wajib" on question text
-    if item.locator('[aria-label*="Wajib"], [aria-label*="Required"]').count() > 0:
+    """Check if question is marked required.
+
+    Handles Google Forms modern + older variants:
+    - Spans with class 'freebirdFormviewerComponentsQuestionBaseRequiredAsterisk'
+    - aria-label 'Wajib' or 'Required'
+    - Asterisk '*' in heading text
+    """
+    # Method 1: Google Forms required asterisk class
+    asterisk = item.locator(".freebirdFormviewerComponentsQuestionBaseRequiredAsterisk")
+    if asterisk.count() > 0:
         return True
-    # Method 2: asterisk in heading text
+
+    # Method 2: aria-label containing Wajib/Required
+    aria_required = item.locator('[aria-label*="Wajib"], [aria-label*="Required"]')
+    if aria_required.count() > 0:
+        return True
+
+    # Method 3: Asterisk in heading text
     heading = item.locator('div[role="heading"]').first
-    return bool(heading.count() > 0 and "*" in heading.inner_text())
+    if heading.count() > 0:
+        heading_text = heading.inner_text().strip()
+        if heading_text.endswith("*") or "*" in heading_text:
+            return True
+
+    return False
 
 
 def _has_media(item) -> bool:
