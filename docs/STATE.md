@@ -4,56 +4,29 @@ Memori kerja project. Setiap sesi WAJIB update di sini. Sesi berikutnya baca fil
 
 ## Status Saat Ini
 
-**Fase:** Scaffolding (Sesi 1)
+**Fase:** Fase 1 Selesai (Scraper MVP & Fondasi Python)
 **Iterasi aktif:** `tasks/current/prd.md` — Iterasi 1
-**Kode fungsional:** Belum ada
+**Kode fungsional:** `formpilot/scraper.py`, `formpilot/__main__.py`
 **Blocker:** Tidak ada
 
 ## Log Sesi
 
-### 2026-10-25 — Sesi 1 (Fondasi)
+### 2026-10-25 — Sesi 2 & 3 (Fase 1: Fondasi Python & Scraper MVP)
 
 **Selesai:**
-- Struktur folder dibuat
-- README.md, AGENTS.md, .gitignore
-- docs/architecture.md, commands.md, STATE.md, DECISIONS.md, SKILLS-ADAPTED.md
-- tasks/current/prd.md
-- config/example.yaml, config/example.env
+- Fase 1.1 s/d 1.5: `pyproject.toml`, `formpilot/__init__.py`, `formpilot/utils/logger.py`, `formpilot/utils/config_loader.py`, `formpilot/memory/schema.py`, `tests/test_schema.py`
+- Fase 1.6 s/d 1.11: `formpilot/scraper.py`, `formpilot/__main__.py`, `tests/fixtures/sample_form.html`, `tests/test_scraper.py`
+- Instalasi Playwright Chromium dan seluruh dependensi dev (`pytest`, `ruff`)
+- Test suite: **18/18 passed** (`pytest -v`)
+- Linter: **All checks passed!** (`ruff check`)
 
-**Gagal:** (tidak ada)
+**Keputusan:**
+- Menggunakan `StrEnum` untuk `FieldType` demi kepatuhan ruff rule `UP042`.
+- Scraper menggunakan sync Playwright API dengan modul singletons terkelola.
 
-**Keputusan:** Lihat docs/DECISIONS.md ADR-001 s/d ADR-005
-
-**Berikutnya (Sesi 2):**
-- Cek `graphify --help` (support .py?)
-- Buat pyproject.toml
-- Buat formpilot/__init__.py
-- Buat formpilot/utils/logger.py
-- Buat formpilot/utils/config_loader.py
-- Buat formpilot/memory/schema.py
-- Belum sentuh scraper/brain
-
-### 2026-10-25 — Sesi 1.5 (Fondasi Lanjutan)
-
-**Selesai:**
-- `docs/AGENT-BRIEF.md` — handbook lengkap untuk AI agent sesi baru
-- `docs/INDEX.md` — peta navigasi semua dokumen
-- `docs/ROADMAP.md` — fase, milestone, estimasi
-- `docs/PHASES.md` — step-by-step detail tiap fase
-- `docs/PRODUCT.md` — visi, target, use case, bayangan akhir
-- `docs/REQUIREMENTS.md` — hardware, software, skill, time
-- `AGENTS.md` — tambah section 11 (navigasi dokumen)
-- `LICENSE` — MIT, Copyright Raynato Lienardy 2026
-
-**Gagal:** (tidak ada)
-
-**Keputusan:** Dokumen fondasi v2 lengkap. Iterasi 1 siap dimulai.
-
-**Berikutnya (Sesi 2 — Fase 1.1):**
-- Baca `docs/AGENT-BRIEF.md` dan `docs/PHASES.md` (Fase 1) terlebih dulu
-- Mulai dari Fase 1.1: `pyproject.toml`
-- Ikuti urutan Fase 1.1 → 1.11 di `docs/PHASES.md`
-- Update STATE.md setiap sub-fase selesai
+**Berikutnya (Sesi 4 — Fase 2: Brain MVP / Integrasi Ollama):**
+- Implementasi `formpilot/brain.py` untuk parsing jawaban AI via Ollama.
+- Tambah test untuk brain.
 
 **Blocker:** (tidak ada)
 
