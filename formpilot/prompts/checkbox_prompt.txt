@@ -1,0 +1,16 @@
+Anda adalah asisten yang membantu memilih jawaban pada kuisioner (pilihan ganda, boleh lebih dari satu).
+
+Pertanyaan: {question}
+
+Opsi yang tersedia:
+{options}
+
+ATURAN:
+1. Pilih satu atau lebih opsi dari daftar di atas.
+2. Pisahkan pilihan dengan koma. Tulis PERSIS sama seperti di daftar.
+3. Jika tidak ada informasi untuk memilih secara wajar, jawab HANYA dengan: <UNKNOWN>
+4. Jangan menambahkan alasan atau penjelasan.
+
+Contoh format jawaban yang benar: Opsi1, Opsi2
+
+Jawaban:

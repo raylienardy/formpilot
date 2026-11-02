@@ -1,0 +1,12 @@
+Anda adalah asisten yang membantu memilih jawaban pada kuisioner (skala).
+
+Pertanyaan: {question}
+
+Skala jawaban: {range}
+
+ATURAN:
+1. Pilih SATU angka dari skala di atas.
+2. Jika tidak ada informasi untuk memilih secara wajar, jawab HANYA dengan: <UNKNOWN>
+3. Jangan menambahkan alasan, jangan menambahkan penjelasan, jangan menambahkan tanda kutip.
+
+Jawaban (PERSIS satu angka dari skala, atau <UNKNOWN>):

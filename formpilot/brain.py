@@ -2,12 +2,19 @@
 
 Responsibilities:
 - Check Ollama server health
-- Generate answers using LLM
-- Classify questions (faktual vs naratif)
-- Select options for multiple choice fields
+- Generate answers using local LLM via Ollama API
+- Select options for multiple choice fields (validate against allowed options)
+- Signal uncertainty via <UNKNOWN> marker so CLI can escalate to user
+
+Non-responsibilities (Fase 4+):
+- Memory retrieval (SQLite / ChromaDB)
+- Long-term storage of answers
 """
 
 from __future__ import annotations
+
+import re
+from pathlib import Path
 
 import requests
 
@@ -17,75 +24,141 @@ from formpilot.utils.logger import get_logger
 
 logger = get_logger("formpilot.brain")
 
+UNKNOWN_MARKER = "<UNKNOWN>"
+PROMPTS_DIR = Path(__file__).parent / "prompts"
+
 
 class BrainError(Exception):
     """Raised when brain fails to resolve a question."""
 
 
 def check_ollama_ready(config: AppConfig) -> bool:
-    """Check if Ollama server is accessible and model exists."""
+    """Check if Ollama server is accessible and model exists.
+
+    Returns:
+        True if server reachable AND model present in `ollama list`.
+
+    Raises:
+        BrainError: If server unreachable or model not found (fail fast).
+    """
     url = f"{config.ollama.base_url}/api/tags"
     try:
         response = requests.get(url, timeout=5)
         response.raise_for_status()
-        models = [m["name"] for m in response.json().get("models", [])]
-        if config.ollama.model not in models:
-            logger.error("Model %s not found in Ollama", config.ollama.model)
-            return False
-        return True
     except requests.exceptions.RequestException as e:
-        logger.error("Ollama connection error: %s", e)
-        return False
+        raise BrainError(
+            f"Ollama server not reachable at {config.ollama.base_url}. "
+            f"Is Ollama running? Start it with: `ollama serve`. Error: {e}"
+        ) from e
+
+    models = [m.get("name", "") for m in response.json().get("models", [])]
+    if config.ollama.model not in models:
+        raise BrainError(
+            f"Model '{config.ollama.model}' not found in Ollama. "
+            f"Available: {models}. Install with: `ollama pull {config.ollama.model}`"
+        )
+
+    logger.info("Ollama ready (model=%s)", config.ollama.model)
+    return True
 
 
 def call_ollama(config: AppConfig, prompt: str, system_prompt: str = "") -> str:
-    """Call Ollama API."""
+    """Call Ollama /api/generate endpoint (non-streaming).
+
+    Args:
+        config: App configuration with ollama settings.
+        prompt: User prompt.
+        system_prompt: Optional system prompt.
+
+    Returns:
+        Model response as string (stripped).
+
+    Raises:
+        BrainError: If API call fails.
+    """
     url = f"{config.ollama.base_url}/api/generate"
     payload = {
         "model": config.ollama.model,
         "prompt": prompt,
-        "system": system_prompt,
         "stream": False,
-        "options": {"temperature": config.ollama.temperature},
+        "options": {
+            "temperature": config.ollama.temperature,
+        },
     }
+    if system_prompt:
+        payload["system"] = system_prompt
+
     try:
         response = requests.post(url, json=payload, timeout=config.ollama.timeout_seconds)
         response.raise_for_status()
-        return response.json()["response"]
     except requests.exceptions.RequestException as e:
         raise BrainError(f"Ollama API call failed: {e}") from e
 
+    text = response.json().get("response", "").strip()
+    logger.debug("Ollama response (first 100 chars): %s", text[:100])
+    return text
+
 
 def resolve_questions(config: AppConfig, questions: list[Question]) -> list[Answer]:
-    """Resolve a list of questions using the brain."""
-    answers: list[Answer] = []
-    for q in questions:
-        answers.append(_resolve_single_question(config, q))
-    return answers
+    """Resolve a list of questions using the LLM.
+
+    Args:
+        config: App configuration.
+        questions: List of questions to answer.
+
+    Returns:
+        List of Answer objects (same length as questions, same order).
+    """
+    return [_resolve_single_question(config, q) for q in questions]
 
 
 def _resolve_single_question(config: AppConfig, q: Question) -> Answer:
-    """Resolve a single question."""
-    # Placeholder: Simple logic based on field type
-    # Fase 4 akan mengintegrasikan MemoryStore
+    """Resolve a single question via LLM.
 
-    if q.field_type == FieldType.RADIO and q.options:
-        # Simplest: pick first option
-        value = q.options[0]
+    Strategy per field type:
+    - SHORT_TEXT / PARAGRAPH: LLM generates short/narrative answer.
+      If LLM cannot (needs personal info), returns <UNKNOWN> → needs_cli=True.
+    - RADIO / DROPDOWN: LLM selects one option; validated against q.options.
+    - CHECKBOX: LLM selects multiple options; validated.
+    - LINEAR_SCALE: LLM picks a number in range; validated.
+    - UNKNOWN / has_media: skip → needs_cli=True.
+    """
+    if q.has_media:
+        logger.info("Question %d has media — escalate to user", q.index)
         return Answer(
             question_index=q.index,
-            value=value,
-            source="llm",
-            confidence=0.8,
+            value="",
+            source="skip",
+            needs_cli=True,
+            confidence=0.0,
         )
 
-    if q.field_type in (FieldType.SHORT_TEXT, FieldType.PARAGRAPH):
-        # Dummy answer
+    if q.field_type == FieldType.UNKNOWN:
         return Answer(
             question_index=q.index,
-            value="Contoh jawaban untuk " + q.text[:20],
-            source="llm",
-            confidence=0.7,
+            value="",
+            source="skip",
+            needs_cli=True,
+            confidence=0.0,
+        )
+
+    try:
+        if q.field_type in (FieldType.SHORT_TEXT, FieldType.PARAGRAPH):
+            return _resolve_text(config, q)
+        if q.field_type in (FieldType.RADIO, FieldType.DROPDOWN):
+            return _resolve_radio(config, q)
+        if q.field_type == FieldType.CHECKBOX:
+            return _resolve_checkbox(config, q)
+        if q.field_type == FieldType.LINEAR_SCALE:
+            return _resolve_scale(config, q)
+    except BrainError as e:
+        logger.error("Brain failed for question %d: %s", q.index, e)
+        return Answer(
+            question_index=q.index,
+            value="",
+            source="error",
+            needs_cli=True,
+            confidence=0.0,
         )
 
     return Answer(
@@ -95,3 +168,197 @@ def _resolve_single_question(config: AppConfig, q: Question) -> Answer:
         needs_cli=True,
         confidence=0.0,
     )
+
+
+def _load_prompt_template(name: str) -> str:
+    """Load prompt template from formpilot/prompts/<name>.txt."""
+    path = PROMPTS_DIR / f"{name}.txt"
+    if not path.exists():
+        raise BrainError(f"Prompt template missing: {path}")
+    return path.read_text(encoding="utf-8")
+
+
+def _resolve_text(config: AppConfig, q: Question) -> Answer:
+    """Resolve SHORT_TEXT or PARAGRAPH via LLM."""
+    template = _load_prompt_template("text_prompt")
+    prompt = template.format(question=q.text)
+    response = call_ollama(config, prompt).strip()
+
+    # Robust UNKNOWN detection (handles both <UNKNOWN> and UNKNOWN from model)
+    if UNKNOWN_MARKER in response or "UNKNOWN" in response.upper() or not response:
+        logger.info("LLM returned UNKNOWN for Q%d — needs user input", q.index)
+        return Answer(
+            question_index=q.index,
+            value="",
+            source="llm_unknown",
+            needs_cli=True,
+            confidence=0.0,
+        )
+
+    return Answer(
+        question_index=q.index,
+        value=response,
+        source="llm",
+        needs_cli=False,
+        confidence=0.7,
+    )
+
+
+def _resolve_radio(config: AppConfig, q: Question) -> Answer:
+    """Resolve RADIO/DROPDOWN — LLM must pick one of q.options."""
+    if not q.options:
+        return Answer(
+            question_index=q.index,
+            value="",
+            source="skip",
+            needs_cli=True,
+            confidence=0.0,
+        )
+
+    template = _load_prompt_template("radio_prompt")
+    options_block = "\n".join(f"- {opt}" for opt in q.options)
+    prompt = template.format(question=q.text, options=options_block)
+    response = call_ollama(config, prompt).strip()
+
+    if UNKNOWN_MARKER in response or "UNKNOWN" in response.upper():
+        return Answer(
+            question_index=q.index,
+            value="",
+            source="llm_unknown",
+            needs_cli=True,
+            confidence=0.0,
+        )
+
+    # Validate: response must match one of the options (case-insensitive, stripped)
+    matched = _match_option(response, q.options)
+    if matched is None:
+        logger.warning(
+            "LLM response '%s' not in options for Q%d. Falling back to needs_cli.",
+            response[:50],
+            q.index,
+        )
+        return Answer(
+            question_index=q.index,
+            value="",
+            source="llm_invalid",
+            needs_cli=True,
+            confidence=0.0,
+        )
+
+    return Answer(
+        question_index=q.index,
+        value=matched,
+        source="llm",
+        needs_cli=False,
+        confidence=0.8,
+    )
+
+
+def _resolve_checkbox(config: AppConfig, q: Question) -> Answer:
+    """Resolve CHECKBOX — LLM may select multiple options."""
+    if not q.options:
+        return Answer(
+            question_index=q.index,
+            value="",
+            source="skip",
+            needs_cli=True,
+            confidence=0.0,
+        )
+
+    template = _load_prompt_template("checkbox_prompt")
+    options_block = "\n".join(f"- {opt}" for opt in q.options)
+    prompt = template.format(question=q.text, options=options_block)
+    response = call_ollama(config, prompt).strip()
+
+    if UNKNOWN_MARKER in response or "UNKNOWN" in response.upper():
+        return Answer(
+            question_index=q.index,
+            value="",
+            source="llm_unknown",
+            needs_cli=True,
+            confidence=0.0,
+        )
+
+    # Response expected as comma-separated list
+    selected = [s.strip() for s in response.split(",") if s.strip()]
+    matched_list = []
+    for sel in selected:
+        m = _match_option(sel, q.options)
+        if m is not None and m not in matched_list:
+            matched_list.append(m)
+
+    if not matched_list:
+        return Answer(
+            question_index=q.index,
+            value="",
+            source="llm_invalid",
+            needs_cli=True,
+            confidence=0.0,
+        )
+
+    return Answer(
+        question_index=q.index,
+        value=", ".join(matched_list),
+        source="llm",
+        needs_cli=False,
+        confidence=0.7,
+    )
+
+
+def _resolve_scale(config: AppConfig, q: Question) -> Answer:
+    """Resolve LINEAR_SCALE — LLM picks number in range."""
+    if not q.options:
+        return Answer(
+            question_index=q.index,
+            value="",
+            source="skip",
+            needs_cli=True,
+            confidence=0.0,
+        )
+
+    template = _load_prompt_template("linear_scale_prompt")
+    range_str = f"{q.options[0]} sampai {q.options[-1]}"
+    prompt = template.format(question=q.text, range=range_str)
+    response = call_ollama(config, prompt).strip()
+
+    if UNKNOWN_MARKER in response:
+        return Answer(
+            question_index=q.index,
+            value="",
+            source="llm_unknown",
+            needs_cli=True,
+            confidence=0.0,
+        )
+
+    matched = _match_option(response, q.options)
+    if matched is None:
+        return Answer(
+            question_index=q.index,
+            value="",
+            source="llm_invalid",
+            needs_cli=True,
+            confidence=0.0,
+        )
+
+    return Answer(
+        question_index=q.index,
+        value=matched,
+        source="llm",
+        needs_cli=False,
+        confidence=0.7,
+    )
+
+
+def _match_option(response: str, options: list[str]) -> str | None:
+    """Match response against options (case-insensitive, whitespace-trimmed)."""
+    response_norm = re.sub(r"\s+", " ", response.strip().lower())
+    for opt in options:
+        opt_norm = re.sub(r"\s+", " ", opt.strip().lower())
+        if opt_norm == response_norm:
+            return opt
+    # Substring fallback: option contained in response
+    for opt in options:
+        opt_norm = opt.strip().lower()
+        if opt_norm in response_norm:
+            return opt
+    return None

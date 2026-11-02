@@ -11,8 +11,8 @@
 | OS | Windows 10 / macOS 12 / Ubuntu 22.04 | Windows 11 / macOS 14 / Ubuntu 24.04 | Support baik |
 
 ### Tanpa GPU: model apa?
-- 16 GB RAM → `qwen2.5:7b-instruct-q4_K_M` (~4.5 GB)
-- 32 GB RAM → `qwen2.5:14b-instruct-q4_K_M` (~9 GB) — kualitas lebih baik
+- 16 GB RAM → `qwen2.5:7b` (~4.5 GB)
+- 32 GB RAM → `qwen2.5:14b` (~9 GB) — kualitas lebih baik
 - `< 16 GB RAM` → **TIDAK disarankan**. Model 3B terlalu kecil untuk tugas ini.
 
 ### Dengan GPU (NVIDIA):
@@ -40,7 +40,7 @@
 - Chromium browser
 
 ### Yang di-download via Ollama
-- `qwen2.5:7b-instruct-q4_K_M` (~4.5 GB)
+- `qwen2.5:7b` (~4.5 GB)
 - `nomic-embed-text` (~274 MB, untuk embedding)
 
 **Total download:** ~5-6 GB (pertama kali)
