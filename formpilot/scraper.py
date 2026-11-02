@@ -2,53 +2,39 @@
 
 Responsibilities:
 - Open form URL
-- Extract questions per page (Google Forms has multiple pages)
-- Detect field types (short text, paragraph, radio, checkbox, dropdown, linear scale)
+- Extract questions per page
+- Fill answers into current page
 - Navigate between pages (Next / Submit)
-- Detect validation errors
-- Detect whether current page is the last page
+- Detect validation errors (both alert and disabled-button signals)
 - Detect total page count from progress indicator
 
 Non-responsibilities:
-- Filling answers (Fase 2+ / Fase 4+)
-- Calling Ollama (brain.py)
-- Reading/writing memory (memory/)
+- LLM calls (brain.py)
+- Memory storage (memory/, Fase 4)
+- CLI loop for needs_cli (Fase 4)
 """
 
 from __future__ import annotations
 
 import re
-from contextlib import suppress
 
 from playwright.sync_api import Page, sync_playwright
 
-from formpilot.memory.schema import ExtractedForm, FieldType, Question
+from formpilot.memory.schema import Answer, ExtractedForm, FieldType, Question
 from formpilot.utils.logger import get_logger
+
 
 logger = get_logger("formpilot.scraper")
 
 DEFAULT_TIMEOUT_MS = 30000
-PAGE_TRANSITION_WAIT_MS = 600  # wait after clicking Next, for DOM update
+PAGE_TRANSITION_WAIT_MS = 600
 
-# Module-level singletons; managed by open_form() / close()
 _playwright = None
 _browser = None
 
 
 def open_form(url: str, headless: bool = True, timeout_ms: int = DEFAULT_TIMEOUT_MS) -> Page:
-    """Launch browser and navigate to form URL.
-
-    Args:
-        url: Google Forms URL.
-        headless: Run browser without UI (True) or visible (False).
-        timeout_ms: Page navigation timeout.
-
-    Returns:
-        Playwright Page object. Must be closed via close(page).
-
-    Raises:
-        playwright.sync_api.TimeoutError: If page doesn't load within timeout.
-    """
+    """Launch browser and navigate to form URL."""
     global _playwright, _browser
 
     logger.info("Opening form: %s (headless=%s)", url, headless)
@@ -65,28 +51,15 @@ def open_form(url: str, headless: bool = True, timeout_ms: int = DEFAULT_TIMEOUT
 
 
 def extract_questions(page: Page, page_number: int = 1) -> ExtractedForm:
-    """Extract questions from current page.
-
-    Args:
-        page: Playwright Page with form loaded.
-        page_number: Current page number (1-indexed).
-
-    Returns:
-        ExtractedForm with all questions on this page.
-    """
+    """Extract questions from current page."""
     logger.debug("Extracting questions from page %d", page_number)
 
-    items = page.locator('div[role="listitem"]').all()
+    items = [item for item in page.locator('div[role="listitem"]').all() if item.is_visible()]
     questions: list[Question] = []
 
     for idx, item in enumerate(items):
-        if not item.is_visible():
-            logger.debug("Skipping listitem %d: not visible", idx)
-            continue
-
         text = _extract_question_text(item)
         if not text:
-            logger.debug("Skipping listitem %d: empty text", idx)
             continue
 
         field_type, options = _detect_field_type(item)
@@ -102,14 +75,6 @@ def extract_questions(page: Page, page_number: int = 1) -> ExtractedForm:
                 required=required,
                 has_media=has_media,
             )
-        )
-        logger.debug(
-            "  [%d] %s (type=%s, options=%d, required=%s)",
-            idx,
-            text[:50],
-            field_type.value,
-            len(options),
-            required,
         )
 
     extracted = ExtractedForm(
@@ -129,81 +94,107 @@ def extract_questions(page: Page, page_number: int = 1) -> ExtractedForm:
     return extracted
 
 
-def click_next(page: Page) -> bool:
-    """Click 'Next' button and wait for page transition.
+def fill_answers(page: Page, questions: list[Question], answers: list[Answer]) -> int:
+    """Fill answers into current page. Skip needs_cli=True or empty values.
 
-    Returns:
-        True if Next button was found and clicked successfully.
-        False if no Next button (meaning we're on the last page).
+    Returns: number of fields successfully filled.
     """
-    next_btns = page.locator(
+    items = [item for item in page.locator('div[role="listitem"]').all() if item.is_visible()]
+    if len(items) != len(questions):
+        logger.warning(
+            "Item count mismatch: %d DOM items, %d questions",
+            len(items),
+            len(questions),
+        )
+
+    filled = 0
+    for item, q, a in zip(items, questions, answers):
+        if a.needs_cli or not a.value:
+            logger.debug("Skip Q%d (needs_cli=%s, value=%r)", q.index, a.needs_cli, a.value)
+            continue
+        try:
+            _fill_single(item, q, a.value)
+            filled += 1
+            logger.debug("Filled Q%d with %r", q.index, a.value[:50])
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Failed to fill Q%d: %s", q.index, e)
+
+    logger.info("Filled %d/%d fields", filled, len(questions))
+    return filled
+
+
+def click_next(page: Page) -> bool:
+    """Click Next button. Returns False if button missing OR disabled."""
+    next_btn = page.locator(
         'div[role="button"]:has-text("Berikutnya"), '
         'div[role="button"]:has-text("Next"), '
         'div[role="button"]:has-text("Lanjutkan"), '
         'div[role="button"]:has-text("Continue")'
-    ).all()
+    ).filter(visible=True)
 
-    visible_btn = None
-    for btn in next_btns:
-        if btn.is_visible():
-            visible_btn = btn
-            break
+    if next_btn.count() == 0:
+        logger.debug("No Next button (last page?)")
+        return False
 
-    if visible_btn is None:
-        logger.debug("No visible Next button found (last page?)")
+    # NEW: detect disabled state (required field empty)
+    disabled = next_btn.first.get_attribute("aria-disabled")
+    if disabled == "true":
+        logger.warning(
+            "Next button is disabled — required field(s) likely empty. "
+            "Cannot proceed without filling them."
+        )
         return False
 
     logger.debug("Clicking Next")
-    visible_btn.click()
+    next_btn.first.click()
 
-    # Wait for DOM to settle. Try networkidle first (for real forms),
-    # fall back to timeout (for JS-only pages like test fixtures).
-    with suppress(Exception):
+    try:
         page.wait_for_load_state("networkidle", timeout=2000)
+    except Exception:  # noqa: BLE001
+        pass
     page.wait_for_timeout(PAGE_TRANSITION_WAIT_MS)
-
-    logger.debug("Page transition complete")
     return True
 
 
 def click_submit(page: Page) -> None:
-    """Click Submit button. Does not verify successful submission."""
-    submit_btns = page.locator(
+    """Click Submit button."""
+    submit_btn = page.locator(
         'div[role="button"]:has-text("Kirim"), '
         'div[role="button"]:has-text("Submit"), '
         'div[role="button"]:has-text("Send")'
-    ).all()
+    ).filter(visible=True)
 
-    visible_btn = None
-    for btn in submit_btns:
-        if btn.is_visible():
-            visible_btn = btn
-            break
+    if submit_btn.count() == 0:
+        raise RuntimeError("No Submit button on this page")
 
-    if visible_btn is None:
-        raise RuntimeError("No Submit button found on this page")
+    if submit_btn.first.get_attribute("aria-disabled") == "true":
+        raise RuntimeError("Submit button is disabled — required field(s) empty")
 
     logger.info("Clicking Submit")
-    visible_btn.click()
-    with suppress(Exception):
+    submit_btn.first.click()
+    try:
         page.wait_for_load_state("networkidle", timeout=5000)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def has_validation_error(page: Page) -> str | None:
-    """Check if form shows a validation error after clicking Next.
+    """Check for validation error after clicking Next.
 
-    Returns:
-        Error message string if found, None otherwise.
+    Two signals:
+    1. role="alert" elements with error text
+    2. Next button is disabled (indicates required field empty)
     """
+    # Signal 1: alert text
     alerts = page.locator('div[role="alert"]').all()
     for alert in alerts:
         if alert.is_visible():
             msg = alert.inner_text().strip()
             if msg:
-                logger.warning("Validation error detected: %s", msg[:100])
+                logger.warning("Validation error (alert): %s", msg[:100])
                 return msg
 
-    # Fallback: search for common error text
+    # Fallback: search common error text
     error_patterns = [
         "This is a required question",
         "Pertanyaan ini wajib diisi",
@@ -213,21 +204,25 @@ def has_validation_error(page: Page) -> str | None:
     for pattern in error_patterns:
         locator = page.locator(f'text="{pattern}"')
         if locator.count() > 0 and locator.first.is_visible():
-            logger.warning("Validation error text found: %s", pattern)
             return pattern
+
+    # Signal 2: Next button disabled
+    next_btn = page.locator(
+        'div[role="button"]:has-text("Berikutnya"), div[role="button"]:has-text("Next")'
+    ).filter(visible=True)
+    if next_btn.count() > 0 and next_btn.first.get_attribute("aria-disabled") == "true":
+        return "Next button disabled — required field(s) empty"
 
     return None
 
 
 def get_total_pages(page: Page) -> int | None:
-    """Estimate total page count from 'Page X of Y' or 'Halaman X dari Y' text.
-
-    Returns:
-        Total page count, or None if not detectable.
-    """
+    """Parse 'Halaman X dari Y', 'Bagian X dari Y', 'Page X of Y', 'Section X of Y'."""
     patterns = [
         r"Halaman\s+\d+\s+dari\s+(\d+)",
+        r"Bagian\s+\d+\s+dari\s+(\d+)",
         r"Page\s+\d+\s+of\s+(\d+)",
+        r"Section\s+\d+\s+of\s+(\d+)",
     ]
     body_text = page.locator("body").inner_text()
 
@@ -238,22 +233,21 @@ def get_total_pages(page: Page) -> int | None:
                 return int(match.group(1))
             except ValueError:
                 continue
-
     return None
 
 
 def is_last_page(page: Page) -> bool:
-    """Check whether Submit button is present on this page."""
-    submit_btns = page.locator(
+    """Check if Submit button is present and visible."""
+    submit = page.locator(
         'div[role="button"]:has-text("Kirim"), '
         'div[role="button"]:has-text("Submit"), '
         'div[role="button"]:has-text("Send")'
-    ).all()
-    return any(btn.is_visible() for btn in submit_btns)
+    ).filter(visible=True)
+    return submit.count() > 0
 
 
 def close(page: Page | None = None) -> None:
-    """Close browser and stop Playwright. Safe to call multiple times."""
+    """Close browser and stop Playwright."""
     global _playwright, _browser
 
     if _browser is not None:
@@ -270,8 +264,6 @@ def close(page: Page | None = None) -> None:
             logger.warning("Error stopping playwright: %s", e)
         _playwright = None
 
-    logger.debug("Browser closed")
-
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -279,16 +271,10 @@ def close(page: Page | None = None) -> None:
 
 
 def _extract_question_text(item) -> str:
-    """Extract clean question text, removing 'Wajib' / '*' markers."""
     heading = item.locator('div[role="heading"]').first
     if heading.count() == 0:
         return ""
-
-    # Note: can't easily delete DOM nodes via locator; use text extraction with fallback
-    # Google Forms modern asterisk class and aria-labels are handled by _is_required()
-
     raw = heading.inner_text().strip()
-    # Strip trailing markers
     for marker in ["\n*", " *", "*\n", "Wajib", "Required"]:
         raw = raw.replace(marker, "")
     raw = raw.rstrip("*").strip()
@@ -296,7 +282,6 @@ def _extract_question_text(item) -> str:
 
 
 def _detect_field_type(item) -> tuple[FieldType, list[str]]:
-    """Inspect DOM inside item to detect field type + options."""
     if item.locator("textarea").count() > 0:
         return FieldType.PARAGRAPH, []
 
@@ -312,8 +297,7 @@ def _detect_field_type(item) -> tuple[FieldType, list[str]]:
 
     checkbox_group = item.locator('div[role="group"]')
     if checkbox_group.count() > 0:
-        checkboxes = item.locator('div[role="checkbox"]')
-        if checkboxes.count() > 0:
+        if item.locator('div[role="checkbox"]').count() > 0:
             options = _extract_options_from_group(checkbox_group.first, role="checkbox")
             return FieldType.CHECKBOX, options
 
@@ -324,10 +308,8 @@ def _detect_field_type(item) -> tuple[FieldType, list[str]]:
 
 
 def _extract_options_from_group(group, role: str) -> list[str]:
-    """Extract option labels from a radiogroup or checkbox group."""
     options: list[str] = []
-    opts = group.locator(f'div[role="{role}"]').all()
-    for opt in opts:
+    for opt in group.locator(f'div[role="{role}"]').all():
         label = opt.get_attribute("aria-label") or opt.inner_text().strip()
         if label:
             options.append(label)
@@ -335,7 +317,6 @@ def _extract_options_from_group(group, role: str) -> list[str]:
 
 
 def _looks_like_scale(option: str) -> bool:
-    """True if option looks like a scale point."""
     stripped = option.strip()
     if stripped.isdigit():
         return True
@@ -343,33 +324,57 @@ def _looks_like_scale(option: str) -> bool:
 
 
 def _is_required(item) -> bool:
-    """Check if question is marked required.
-
-    Handles Google Forms modern + older variants:
-    - Spans with class 'freebirdFormviewerComponentsQuestionBaseRequiredAsterisk'
-    - aria-label 'Wajib' or 'Required'
-    - Asterisk '*' in heading text
-    """
-    # Method 1: Google Forms required asterisk class
-    asterisk = item.locator(".freebirdFormviewerComponentsQuestionBaseRequiredAsterisk")
-    if asterisk.count() > 0:
+    if item.locator(".freebirdFormviewerComponentsQuestionBaseRequiredAsterisk").count() > 0:
         return True
-
-    # Method 2: aria-label containing Wajib/Required
-    aria_required = item.locator('[aria-label*="Wajib"], [aria-label*="Required"]')
-    if aria_required.count() > 0:
+    if item.locator('[aria-label*="Wajib"], [aria-label*="Required"]').count() > 0:
         return True
-
-    # Method 3: Asterisk in heading text
     heading = item.locator('div[role="heading"]').first
-    if heading.count() > 0:
-        heading_text = heading.inner_text().strip()
-        if heading_text.endswith("*") or "*" in heading_text:
-            return True
-
+    if heading.count() > 0 and "*" in heading.inner_text():
+        return True
     return False
 
 
 def _has_media(item) -> bool:
-    """Check if question contains image or video."""
     return item.locator("img, video").count() > 0
+
+
+def _fill_single(item, q: Question, value: str) -> None:
+    """Fill a single field based on type."""
+    if q.field_type == FieldType.SHORT_TEXT:
+        item.locator('input[type="text"]').first.fill(value)
+        return
+
+    if q.field_type == FieldType.PARAGRAPH:
+        item.locator("textarea").first.fill(value)
+        return
+
+    if q.field_type in (FieldType.RADIO, FieldType.LINEAR_SCALE):
+        opt = _find_option(item, "radio", value)
+        opt.click()
+        return
+
+    if q.field_type == FieldType.CHECKBOX:
+        for opt_value in [s.strip() for s in value.split(",") if s.strip()]:
+            opt = _find_option(item, "checkbox", opt_value)
+            opt.click()
+        return
+
+    if q.field_type == FieldType.DROPDOWN:
+        raise NotImplementedError("Dropdown filling: Fase 4")
+
+    raise ValueError(f"Unsupported field type: {q.field_type}")
+
+
+def _find_option(item, role: str, value: str):
+    """Find radio/checkbox option by aria-label or text."""
+    # Try aria-label exact
+    by_aria = item.locator(f'div[role="{role}"][aria-label="{value}"]')
+    if by_aria.count() > 0:
+        return by_aria.first
+    # Try text match
+    by_text = item.locator(f'div[role="{role}"]').filter(
+        has_text=re.compile(rf"^{re.escape(value)}$")
+    )
+    if by_text.count() > 0:
+        return by_text.first
+    raise ValueError(f"Option {value!r} not found (role={role})")

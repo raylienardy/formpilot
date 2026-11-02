@@ -48,14 +48,11 @@ Commit `b8fbf9f` mengklaim "Fase 3 Selesai" tetapi sebenarnya hanya stub:
 - Warmup fixture ditambahkan di test_brain.py untuk handle cold start Ollama (30-90s load pertama)
 
 **Known Limitations:**
-- **Tanpa memory (Fase 4), semua pertanyaan personal akan `llm_unknown`** — ini desain, bukan bug
-- **`UNKNOWN` detection dilonggarkan** (`"UNKNOWN" in response.upper()`) — bisa false-positive untuk respons dengan kata "unknown" dalam konteks lain. Akan diperketat di Fase 4.
-- **`text_prompt.txt` membedakan personal vs general** — refinement iteratif, perlu uji lebih banyak kasus.
-
-**Known Limitations:**
-- `_resolve_text` tidak bisa membedakan "opini umum" vs "personal fact yang mirip opini" — LLM bisa salah klasifikasi. Akan diperbaiki di Fase 4 (memory system).
-- `total_pages_estimate` masih null untuk form single-page (expected), belum diverifikasi untuk form multi-halaman asli.
-- `_is_required()` belum diverifikasi untuk form asli multi-halaman.
+- **Tanpa memory (Fase 4), semua pertanyaan personal → `llm_unknown`** — desain, bukan bug
+- **`--dummy-fill` adalah placeholder untuk testing** — Fase 4 akan replace dengan CLI loop yang tanya user
+- **Dropdown filling** belum diimplementasi (Fase 4)
+- **`UNKNOWN` detection dilonggarkan** — perlu diperketat di Fase 4
+- **`total_pages_estimate` bisa `null`** jika Google Forms tidak menampilkan "Bagian X dari Y" (kadang hanya via tombol navigasi)
 
 **Berikutnya (Sesi 6 — Fase 4: Memory System):**
 - Implementasi `formpilot/memory/sqlite_store.py`

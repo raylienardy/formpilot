@@ -57,6 +57,7 @@ def test_first_page_not_last(page, multipage_html) -> None:
 
 def test_click_next_succeeds(page, multipage_html) -> None:
     page.set_content(multipage_html, wait_until="domcontentloaded")
+    page.fill("#q1-input", "Budi")
     assert click_next(page) is True
 
 
@@ -73,6 +74,7 @@ def test_navigate_three_pages(page, multipage_html) -> None:
     # Click to page 2
     # Ensure button is ready
     page.wait_for_selector('div[role="button"]:has-text("Berikutnya")')
+    page.fill("#q1-input", "Budi")
     assert click_next(page) is True
     p2 = extract_questions(page, page_number=2)
     assert len(p2.questions) == 1
@@ -135,3 +137,57 @@ def test_validation_cleared_after_fill(page, validation_html) -> None:
     page.fill("#required-input", "Budi")
     page.locator('div[role="button"]:has-text("Berikutnya")').click()
     assert has_validation_error(page) is None
+
+
+# ---------------------------------------------------------------------------
+# New tests for filling and disabled button
+# ---------------------------------------------------------------------------
+
+
+def test_fill_short_text(page, multipage_html) -> None:
+    """fill_answers fills SHORT_TEXT input."""
+    from formpilot.scraper import fill_answers
+    from formpilot.memory.schema import Answer, Question, FieldType
+
+    page.set_content(multipage_html, wait_until="domcontentloaded")
+    q = Question(index=0, text="Nama?", field_type=FieldType.SHORT_TEXT, required=True)
+    a = Answer(question_index=0, value="Budi", source="llm", confidence=0.9)
+    filled = fill_answers(page, [q], [a])
+    assert filled == 1
+    assert page.input_value("#q1-input") == "Budi"
+
+
+def test_fill_radio(page, multipage_html) -> None:
+    """fill_answers clicks matching radio option."""
+    from formpilot.scraper import fill_answers
+    from formpilot.memory.schema import Answer, Question, FieldType
+
+    page.set_content(multipage_html, wait_until="domcontentloaded")
+    page.evaluate("showPage(2)")  # Jump to page 2 with radio
+    q = Question(index=0, text="Jurusan?", field_type=FieldType.RADIO, options=["TI", "SI"])
+    a = Answer(question_index=0, value="SI", source="llm", confidence=0.9)
+    filled = fill_answers(page, [q], [a])
+    assert filled == 1
+
+
+def test_click_next_disabled_returns_false(page, multipage_html) -> None:
+    """click_next returns False if button is disabled (no 30s timeout)."""
+    page.set_content(multipage_html, wait_until="domcontentloaded")
+    # Required field is empty → Next is disabled
+    assert click_next(page) is False
+
+
+def test_click_next_enabled_after_fill(page, multipage_html) -> None:
+    """After filling required field, Next works."""
+    page.set_content(multipage_html, wait_until="domcontentloaded")
+    page.fill("#q1-input", "Budi")
+    # JS should have enabled the button
+    assert click_next(page) is True
+
+
+def test_has_validation_error_disabled_button(page, multipage_html) -> None:
+    """has_validation_error detects disabled Next button."""
+    page.set_content(multipage_html, wait_until="domcontentloaded")
+    error = has_validation_error(page)
+    assert error is not None
+    assert "disabled" in error.lower() or "required" in error.lower()
