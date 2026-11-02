@@ -16,13 +16,13 @@ Non-responsibilities:
 
 from __future__ import annotations
 
+import contextlib
 import re
 
 from playwright.sync_api import Page, sync_playwright
 
 from formpilot.memory.schema import Answer, ExtractedForm, FieldType, Question
 from formpilot.utils.logger import get_logger
-
 
 logger = get_logger("formpilot.scraper")
 
@@ -34,19 +34,85 @@ _browser = None
 
 
 def open_form(url: str, headless: bool = True, timeout_ms: int = DEFAULT_TIMEOUT_MS) -> Page:
-    """Launch browser and navigate to form URL."""
+    """Launch browser and navigate to form URL.
+
+    Uses stealth techniques to avoid Google Forms anti-bot detection:
+    - Overrides navigator.webdriver
+    - Prefers real Edge/Chrome over Playwright Chromium
+    - Disables automation control feature flag
+    - Realistic user agent + viewport
+    """
     global _playwright, _browser
 
     logger.info("Opening form: %s (headless=%s)", url, headless)
 
     _playwright = sync_playwright().start()
-    _browser = _playwright.chromium.launch(headless=headless)
-    context = _browser.new_context()
+
+    # Try real Edge/Chrome first (better fingerprint), fallback to Chromium
+    launch_kwargs = {
+        "headless": headless,
+        "args": [
+            "--disable-blink-features=AutomationControlled",
+            "--disable-features=IsolateOrigins,site-per-process",
+            "--no-sandbox",
+        ],
+    }
+
+    _browser = None
+    for channel in ("msedge", "chrome", None):
+        with contextlib.suppress(Exception):
+            if channel:
+                _browser = _playwright.chromium.launch(channel=channel, **launch_kwargs)
+                logger.info("Launched real browser: %s", channel)
+            else:
+                _browser = _playwright.chromium.launch(**launch_kwargs)
+                logger.info("Launched Playwright Chromium (fallback)")
+            break
+
+    if _browser is None:
+        raise RuntimeError("Failed to launch any browser (msedge, chrome, chromium)")
+
+    context = _browser.new_context(
+        viewport={"width": 1366, "height": 768},
+        user_agent=(
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0"
+        ),
+        locale="id-ID",
+        timezone_id="Asia/Jakarta",
+    )
+
+    # Mask automation fingerprints
+    context.add_init_script(
+        """
+        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+        Object.defineProperty(navigator, 'plugins', {
+            get: () => [1, 2, 3, 4, 5],
+        });
+        Object.defineProperty(navigator, 'languages', {
+            get: () => ['id-ID', 'id', 'en-US', 'en'],
+        });
+        window.chrome = window.chrome || { runtime: {} };
+        """
+    )
+
     page = context.new_page()
     page.set_default_timeout(timeout_ms)
     page.goto(url, wait_until="networkidle", timeout=timeout_ms)
 
     logger.info("Form loaded: %s", page.title())
+
+    # Verify stealth worked
+    webdriver = page.evaluate("() => navigator.webdriver")
+    if webdriver:
+        logger.warning(
+            "navigator.webdriver still exposed (%r). Anti-bot may still trigger.",
+            webdriver,
+        )
+    else:
+        logger.info("Stealth active: navigator.webdriver is undefined")
+
     return page
 
 
@@ -108,7 +174,7 @@ def fill_answers(page: Page, questions: list[Question], answers: list[Answer]) -
         )
 
     filled = 0
-    for item, q, a in zip(items, questions, answers):
+    for item, q, a in zip(items, questions, answers, strict=False):
         if a.needs_cli or not a.value:
             logger.debug("Skip Q%d (needs_cli=%s, value=%r)", q.index, a.needs_cli, a.value)
             continue
@@ -148,10 +214,8 @@ def click_next(page: Page) -> bool:
     logger.debug("Clicking Next")
     next_btn.first.click()
 
-    try:
+    with contextlib.suppress(Exception):
         page.wait_for_load_state("networkidle", timeout=2000)
-    except Exception:  # noqa: BLE001
-        pass
     page.wait_for_timeout(PAGE_TRANSITION_WAIT_MS)
     return True
 
@@ -172,10 +236,8 @@ def click_submit(page: Page) -> None:
 
     logger.info("Clicking Submit")
     submit_btn.first.click()
-    try:
+    with contextlib.suppress(Exception):
         page.wait_for_load_state("networkidle", timeout=5000)
-    except Exception:  # noqa: BLE001
-        pass
 
 
 def has_validation_error(page: Page) -> str | None:
@@ -296,10 +358,9 @@ def _detect_field_type(item) -> tuple[FieldType, list[str]]:
         return FieldType.RADIO, options
 
     checkbox_group = item.locator('div[role="group"]')
-    if checkbox_group.count() > 0:
-        if item.locator('div[role="checkbox"]').count() > 0:
-            options = _extract_options_from_group(checkbox_group.first, role="checkbox")
-            return FieldType.CHECKBOX, options
+    if checkbox_group.count() > 0 and item.locator('div[role="checkbox"]').count() > 0:
+        options = _extract_options_from_group(checkbox_group.first, role="checkbox")
+        return FieldType.CHECKBOX, options
 
     if item.locator('div[role="listbox"]').count() > 0:
         return FieldType.DROPDOWN, []
@@ -329,34 +390,51 @@ def _is_required(item) -> bool:
     if item.locator('[aria-label*="Wajib"], [aria-label*="Required"]').count() > 0:
         return True
     heading = item.locator('div[role="heading"]').first
-    if heading.count() > 0 and "*" in heading.inner_text():
-        return True
-    return False
+    return bool(heading.count() > 0 and "*" in heading.inner_text())
 
 
 def _has_media(item) -> bool:
     return item.locator("img, video").count() > 0
 
 
-def _fill_single(item, q: Question, value: str) -> None:
-    """Fill a single field based on type."""
+def _fill_single(item, q: Question, value: str, timeout_ms: int = 3000) -> None:
+    """Fill a single field based on type.
+
+    Fails fast (3s timeout) if field is disabled. Logs diagnostic info.
+    """
     if q.field_type == FieldType.SHORT_TEXT:
-        item.locator('input[type="text"]').first.fill(value)
+        inp = item.locator('input[type="text"]').first
+        if inp.is_disabled():
+            attrs = inp.evaluate(
+                "el => ({disabled: el.disabled, ariaDisabled: el.getAttribute('aria-disabled'), "
+                "readOnly: el.readOnly, required: el.required, visible: el.offsetParent !== null})"
+            )
+            logger.warning(
+                "Q%d input DISABLED. attrs=%s. "
+                "Google Forms may be anti-botting or form has special config.",
+                q.index,
+                attrs,
+            )
+            raise ValueError(f"Q{q.index} input disabled")
+        inp.fill(value, timeout=timeout_ms)
         return
 
     if q.field_type == FieldType.PARAGRAPH:
-        item.locator("textarea").first.fill(value)
+        ta = item.locator("textarea").first
+        if ta.is_disabled():
+            raise ValueError(f"Q{q.index} textarea disabled")
+        ta.fill(value, timeout=timeout_ms)
         return
 
     if q.field_type in (FieldType.RADIO, FieldType.LINEAR_SCALE):
         opt = _find_option(item, "radio", value)
-        opt.click()
+        opt.click(timeout=timeout_ms)
         return
 
     if q.field_type == FieldType.CHECKBOX:
         for opt_value in [s.strip() for s in value.split(",") if s.strip()]:
             opt = _find_option(item, "checkbox", opt_value)
-            opt.click()
+            opt.click(timeout=timeout_ms)
         return
 
     if q.field_type == FieldType.DROPDOWN:

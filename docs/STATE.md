@@ -62,6 +62,13 @@ Commit `b8fbf9f` mengklaim "Fase 3 Selesai" tetapi sebenarnya hanya stub:
 
 **Blocker:** (tidak ada)
 
+**Anti-bot detection (Sesi 5.6):**
+- **Root cause**: `navigator.webdriver=true` → Google Forms disables inputs
+- **Fix**: stealth launch (msedge/chrome channel + init script masking webdriver, plugins, languages + realistic UA + AutomationControlled flag disabled)
+- **Verifikasi**: [ISI SETELAH TEST] — input terisi / masih gagal
+
+- **Anti-bot detection**: Google Forms actively detects automation. Stealth mitigations applied but not 100% guaranteed — Google may update detection. If inputs still disabled after stealth, fallback to playwright-stealth package needed.
+
 ---
 
 ## Dokumen Referensi

@@ -27,7 +27,6 @@ from formpilot.scraper import (
 from formpilot.utils.config_loader import ConfigError, load_config
 from formpilot.utils.logger import get_logger, setup_logger
 
-
 MAX_PAGES = 50
 
 

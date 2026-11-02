@@ -146,8 +146,8 @@ def test_validation_cleared_after_fill(page, validation_html) -> None:
 
 def test_fill_short_text(page, multipage_html) -> None:
     """fill_answers fills SHORT_TEXT input."""
+    from formpilot.memory.schema import Answer, FieldType, Question
     from formpilot.scraper import fill_answers
-    from formpilot.memory.schema import Answer, Question, FieldType
 
     page.set_content(multipage_html, wait_until="domcontentloaded")
     q = Question(index=0, text="Nama?", field_type=FieldType.SHORT_TEXT, required=True)
@@ -159,8 +159,8 @@ def test_fill_short_text(page, multipage_html) -> None:
 
 def test_fill_radio(page, multipage_html) -> None:
     """fill_answers clicks matching radio option."""
+    from formpilot.memory.schema import Answer, FieldType, Question
     from formpilot.scraper import fill_answers
-    from formpilot.memory.schema import Answer, Question, FieldType
 
     page.set_content(multipage_html, wait_until="domcontentloaded")
     page.evaluate("showPage(2)")  # Jump to page 2 with radio
