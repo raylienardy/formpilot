@@ -12,7 +12,7 @@ FormPilot adalah asisten lokal yang membantu pengguna mengisi kuisioner Google F
 | **M1 — Scraper MVP** | 2-3 sesi | Playwright bisa buka form 1 halaman, ekstrak pertanyaan, cetak JSON |
 | **M2 — Multi-page** | 1-2 sesi | Scraper handle form multi-halaman dengan Next/Submit |
 | **M3 — LLM Integration** | 2 sesi | Ollama jalan, brain.py bisa jawab pertanyaan faktual sederhana |
-| **M4 — Memory System** | 2-3 sesi | SQLite + ChromaDB, CLI tanya user, memori tumbuh |
+| **M4 — Memory System** | ✅ Selesai | SQLite + ChromaDB, CLI tanya user, memori tumbuh |
 | **M5 — End-to-End** | 1-2 sesi | CLI lengkap, form bisa diisi dari A-Z |
 | **M6 — v0.1 Release** | 1 sesi | README, demo video, tag v0.1.0 di GitHub |
 | **M7 — Web UI (opsional)** | 3-4 sesi | Halaman review lokal (localhost), tidak wajib |
@@ -83,7 +83,7 @@ FormPilot adalah asisten lokal yang membantu pengguna mengisi kuisioner Google F
 **Estimasi:** 4-5 jam
 **Dependency:** Fase 2 selesai
 
-### FASE 4 — Memory System
+### FASE 4 — Memory System ✅ SELESAI
 **Tujuan:** SQLite + ChromaDB. AI mulai dari kosong, belajar dari user via CLI.
 **Deliverable:**
 - `formpilot/memory/sqlite_store.py`
@@ -101,6 +101,7 @@ FormPilot adalah asisten lokal yang membantu pengguna mengisi kuisioner Google F
 
 **Estimasi:** 6-8 jam
 **Dependency:** Fase 3 selesai
+**Status: SELESAI (2026-11-04)** — commit ddfc446
 
 ### FASE 5 — End-to-End CLI
 **Tujuan:** CLI lengkap dengan Rich, mode draft/auto, session logging.

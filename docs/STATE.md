@@ -191,3 +191,20 @@ CDP (Chrome DevTools Protocol) attach ke Edge/Chrome yang sudah login.
 - Tag v0.1.0
 - User testing (3 orang)
 
+### 2026-11-04 — Sesi 8 (v0.1 Release Prep)
+
+**Selesai:**
+- Mojibake fix in STATE.md (em dash recovery)
+- `docs/ROADMAP.md`: M4 marked SELESAI
+- `CHANGELOG.md`: created with v0.0.1-dev entry
+
+**Keputusan:**
+- Tag `v0.1.0` DITUNDA sampai user testing (3 users)
+- README demo GIF ditunda (screenshot manual bisa nanti)
+
+**Berikutnya (Sesi 9 — User Testing & Release):**
+- Manual test 3 real forms (different types)
+- Fix bugs found during testing
+- Tag v0.1.0
+- GitHub release notes
+
