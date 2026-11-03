@@ -60,6 +60,78 @@ def test_resolve_questions_sqlite_priority(mock_config):
     vector.search_similar.assert_not_called()
 
 
+def test_handle_memory_hit_checkbox_valid(mock_config):
+    """Regression: checkbox memory hit must be validated, not escalated.
+
+    Bug: RUN 2 re-prompted Q2 (checkbox) despite memory hit
+    'Programming, Data' because _handle_memory_hit had no CHECKBOX branch.
+    """
+    from formpilot.brain import _handle_memory_hit
+    from formpilot.memory.schema import MemoryHit
+
+    q = Question(
+        index=1,
+        text="Minat?",
+        field_type=FieldType.CHECKBOX,
+        options=["Programming", "Design", "Data"],
+    )
+    hit = MemoryHit(
+        question="Minat?",
+        answer="Programming, Data",
+        similarity=0.9,
+        source="sqlite",
+    )
+    ans = _handle_memory_hit(q, hit, None, None)
+    assert ans.needs_cli is False
+    assert ans.value == "Programming, Data"
+    assert ans.source == "sqlite_validated"
+
+
+def test_handle_memory_hit_checkbox_invalid_options(mock_config):
+    """Checkbox memory hit with invalid options should escalate."""
+    from formpilot.brain import _handle_memory_hit
+    from formpilot.memory.schema import MemoryHit
+
+    q = Question(
+        index=1,
+        text="Minat?",
+        field_type=FieldType.CHECKBOX,
+        options=["Programming", "Design"],
+    )
+    hit = MemoryHit(
+        question="Minat?",
+        answer="Xyz, Abc",
+        similarity=0.9,
+        source="sqlite",
+    )
+    ans = _handle_memory_hit(q, hit, None, None)
+    assert ans.needs_cli is True
+    assert ans.source == "memory_invalid"
+
+
+def test_handle_memory_hit_linear_scale_valid(mock_config):
+    """Regression: linear_scale memory hit must be validated."""
+    from formpilot.brain import _handle_memory_hit
+    from formpilot.memory.schema import MemoryHit
+
+    q = Question(
+        index=2,
+        text="Kepuasan?",
+        field_type=FieldType.LINEAR_SCALE,
+        options=["1", "2", "3", "4", "5"],
+    )
+    hit = MemoryHit(
+        question="Kepuasan?",
+        answer="4",
+        similarity=0.9,
+        source="sqlite",
+    )
+    ans = _handle_memory_hit(q, hit, None, None)
+    assert ans.needs_cli is False
+    assert ans.value == "4"
+    assert ans.source == "sqlite_validated"
+
+
 def test_resolve_questions_vector_fallback(mock_config):
     """No SQLite hit → falls back to vector store."""
     q = Question(index=1, text="Apa hobi Anda?", field_type=FieldType.SHORT_TEXT)

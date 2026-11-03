@@ -207,6 +207,36 @@ def _handle_memory_hit(
             )
         logger.info("Memory hit invalid for Q%d options: %s", q.index, hit.answer)
 
+    if q.field_type == FieldType.CHECKBOX:
+        # Validate each comma-separated token against options
+        tokens = [t.strip() for t in hit.answer.split(",") if t.strip()]
+        matched_list = []
+        for tok in tokens:
+            m = _match_option(tok, q.options)
+            if m is not None and m not in matched_list:
+                matched_list.append(m)
+        if matched_list:
+            return Answer(
+                question_index=q.index,
+                value=", ".join(matched_list),
+                source=f"{hit.source}_validated",
+                needs_cli=False,
+                confidence=min(hit.similarity, 0.9),
+            )
+        logger.info("Memory hit invalid for Q%d checkbox: %s", q.index, hit.answer)
+
+    if q.field_type == FieldType.LINEAR_SCALE:
+        matched = _match_option(hit.answer, q.options)
+        if matched:
+            return Answer(
+                question_index=q.index,
+                value=matched,
+                source=f"{hit.source}_validated",
+                needs_cli=False,
+                confidence=min(hit.similarity, 0.9),
+            )
+        logger.info("Memory hit invalid for Q%d scale: %s", q.index, hit.answer)
+
     return Answer(
         question_index=q.index,
         value="",
