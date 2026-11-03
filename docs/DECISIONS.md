@@ -70,3 +70,32 @@ Agen AI WAJIB baca ini sebelum saran perubahan besar.
 **Alasan:** Faktual tidak butuh semantic search, ChromaDB untuk naratif saja, audit mudah, query deterministik.
 
 **Aturan:** < 100 char tanpa opini → SQLite. ≥ 100 char atau opini → ChromaDB. Ragu → tanya user.
+
+## ADR-006: PARAGRAPH Always Escalates to User
+
+**Tanggal:** 2026-11-04
+**Status:** Diterima
+
+**Konteks:**
+Manual test Form 2b dan Form 3 menunjukkan LLM menjawab PARAGRAPH
+questions dengan narasi generik. Source=llm, jawaban tidak masuk memory,
+Chroma count tetap 0. Memory tidak tumbuh.
+
+**Keputusan:**
+PARAGRAPH questions selalu escalate ke user via interactive CLI.
+LLM tidak menjawab paragraph.
+
+**Alasan:**
+1. Sesuai P4: "Memori tumbuh dari interaksi"
+2. Paragraph = refleksi pribadi = butuh input user asli
+3. LLM generic answer tidak berguna untuk user
+4. Dengan user answer, memory tumbuh dan RUN 2 bisa auto-fill
+5. Chroma path end-to-end teruji
+
+**Konsekuensi:**
+- Setiap PARAGRAPH di form baru akan prompt user (first time)
+- Setelah dijawab sekali, RUN berikutnya auto-fill dari Chroma
+- FormPilot terasa lebih "belajar" dari user, bukan "mengarang"
+
+**Jangan diubah tanpa diskusi eksplisit.** Untuk v0.2, opsi "LLM draft,
+user edit" bisa dievaluasi.

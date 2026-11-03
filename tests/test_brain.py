@@ -140,8 +140,31 @@ def test_match_option_no_match():
 # ---------------------------------------------------------------------------
 
 
+def test_paragraph_always_escalates_not_llm(mock_config):
+    """Regression: PARAGRAPH must never be answered by LLM.
+
+    Bug: LLM answered 'review fasilitas kampus' with generic text,
+    source=llm. User never prompted. Memory never grew.
+
+    Fix: PARAGRAPH always escalates (source=paragraph_escalated).
+    """
+    q = Question(
+        index=0,
+        text="Tulis review fasilitas kampus (minimal 2 kalimat)",
+        field_type=FieldType.PARAGRAPH,
+    )
+    # Patch call_ollama to assert it's never called
+    with patch("formpilot.brain.call_ollama") as mock_llm:
+        answers = resolve_questions(mock_config, [q])
+        mock_llm.assert_not_called()
+    assert len(answers) == 1
+    assert answers[0].needs_cli is True
+    assert answers[0].source == "paragraph_escalated"
+    assert answers[0].value == ""
+
+
 def test_resolve_text_real_llm_response(mock_config):
-    q = Question(index=0, text="Motivasi Anda?", field_type=FieldType.PARAGRAPH)
+    q = Question(index=0, text="Motivasi Anda?", field_type=FieldType.SHORT_TEXT)
     with patch("formpilot.brain.call_ollama", return_value="Ingin belajar hal baru"):
         answers = resolve_questions(mock_config, [q])
     assert len(answers) == 1

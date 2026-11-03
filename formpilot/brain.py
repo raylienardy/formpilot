@@ -152,7 +152,22 @@ def _resolve_single_question(
 
     # 2. LLM Fallback
     try:
-        if q.field_type in (FieldType.SHORT_TEXT, FieldType.PARAGRAPH):
+        if q.field_type == FieldType.PARAGRAPH:
+            # PARAGRAPH = narrative = personal reflection. Always escalate
+            # to user so their real answer is saved to memory (Chroma).
+            # LLM does not answer paragraph questions.
+            logger.info(
+                "Q%d is PARAGRAPH — escalating to user for personal input",
+                q.index,
+            )
+            return Answer(
+                question_index=q.index,
+                value="",
+                source="paragraph_escalated",
+                needs_cli=True,
+                confidence=0.0,
+            )
+        if q.field_type == FieldType.SHORT_TEXT:
             return _resolve_text(config, q)
         if q.field_type in (FieldType.RADIO, FieldType.DROPDOWN):
             return _resolve_radio(config, q)
