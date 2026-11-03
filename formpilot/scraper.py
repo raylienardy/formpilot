@@ -359,7 +359,13 @@ def fill_answers(page: Page, questions: list[Question], answers: list[Answer]) -
 
 
 def click_next(page: Page) -> bool:
-    """Click Next button. Returns False if button missing OR disabled."""
+    """Click Next button and verify page actually navigated.
+
+    Returns False if:
+    - No Next button (last page)
+    - Next button is disabled (required field missing)
+    - Page did not navigate after click (identical content)
+    """
     next_btn = page.locator(
         'div[role="button"]:has-text("Berikutnya"), '
         'div[role="button"]:has-text("Next"), '
@@ -371,7 +377,6 @@ def click_next(page: Page) -> bool:
         logger.debug("No Next button (last page?)")
         return False
 
-    # NEW: detect disabled state (required field empty)
     disabled = next_btn.first.get_attribute("aria-disabled")
     if disabled == "true":
         logger.warning(
@@ -380,13 +385,44 @@ def click_next(page: Page) -> bool:
         )
         return False
 
+    # Capture signature before click
+    before_sig = _page_signature(page)
+
     logger.debug("Clicking Next")
     next_btn.first.click()
 
     with contextlib.suppress(Exception):
-        page.wait_for_load_state("networkidle", timeout=2000)
+        page.wait_for_load_state("networkidle", timeout=3000)
     page.wait_for_timeout(PAGE_TRANSITION_WAIT_MS)
-    return True
+
+    # Verify navigation: retry up to 3 times with 500ms delay
+    for attempt in range(3):
+        after_sig = _page_signature(page)
+        if after_sig != before_sig:
+            logger.debug("Navigation confirmed (attempt %d)", attempt + 1)
+            return True
+        page.wait_for_timeout(500)
+
+    logger.warning(
+        "Page content UNCHANGED after Next click. "
+        "Validation may be blocking navigation (required field empty, format invalid) "
+        "or form has branching back to same page."
+    )
+    return False
+
+
+def _page_signature(page: Page) -> str:
+    """Capture visible question texts as a signature for navigation detection."""
+    items = page.locator('div[role="listitem"]').all()
+    texts = []
+    for item in items:
+        if not item.is_visible():
+            continue
+        heading = item.locator('div[role="heading"]').first
+        if heading.count() == 0:
+            continue
+        texts.append(heading.inner_text().strip()[:80])
+    return "|".join(texts)
 
 
 def click_submit(page: Page) -> None:
@@ -592,6 +628,8 @@ def _fill_single(item, q: Question, value: str, timeout_ms: int = 3000) -> None:
             )
             raise ValueError(f"Q{q.index} input disabled")
         inp.fill(value, timeout=timeout_ms)
+        # Blur to trigger change event (some Google Forms need it for validation)
+        inp.press("Tab", timeout=timeout_ms)
         return
 
     if q.field_type == FieldType.PARAGRAPH:
@@ -599,6 +637,7 @@ def _fill_single(item, q: Question, value: str, timeout_ms: int = 3000) -> None:
         if ta.is_disabled():
             raise ValueError(f"Q{q.index} textarea disabled")
         ta.fill(value, timeout=timeout_ms)
+        ta.press("Tab", timeout=timeout_ms)
         return
 
     if q.field_type in (FieldType.RADIO, FieldType.LINEAR_SCALE):

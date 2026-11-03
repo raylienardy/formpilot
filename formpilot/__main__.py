@@ -172,7 +172,34 @@ def main() -> int:
 
             current_texts = [q.text for q in extracted.questions]
             if page_number > 1 and current_texts == previous_texts:
-                logger.warning("Page %d identical to previous — branching?", page_number)
+                logger.error(
+                    "Page %d has identical questions to page %d — "
+                    "cannot advance. Stopping to prevent infinite loop.",
+                    page_number,
+                    page_number - 1,
+                )
+                print(
+                    json.dumps(
+                        {
+                            "error": "stuck_on_page",
+                            "page": page_number,
+                            "message": (
+                                "Page content identical to previous. "
+                                "Next button may be blocked by validation "
+                                "(required field empty or format invalid)."
+                            ),
+                            "hint": (
+                                "Check if form has field validation constraints "
+                                "(e.g., NIM must be specific length). "
+                                "Try filling manually in browser to confirm."
+                            ),
+                            "all_pages": all_pages,
+                        },
+                        indent=2,
+                        ensure_ascii=False,
+                    )
+                )
+                return 3
             previous_texts = current_texts
 
             if extracted.is_last_page:
@@ -187,8 +214,11 @@ def main() -> int:
                                 "error": "cannot_advance",
                                 "page": page_number,
                                 "message": error,
-                                "hint": "Required fields empty. Fase 4 will add CLI loop. "
-                                "Use --dummy-fill for testing.",
+                                "hint": (
+                                    "Validation failed after Next click. "
+                                    "Required field empty, format invalid, "
+                                    "or branching condition."
+                                ),
                                 "all_pages": all_pages,
                             },
                             indent=2,
@@ -196,7 +226,28 @@ def main() -> int:
                         )
                     )
                     return 2
-                break
+                # click_next returned False but no visible error — log diagnostic
+                logger.error(
+                    "click_next returned False on page %d (last_page=False). "
+                    "Navigation blocked but no alert found.",
+                    page_number,
+                )
+                print(
+                    json.dumps(
+                        {
+                            "error": "navigation_blocked",
+                            "page": page_number,
+                            "message": (
+                                "Next click did not advance page, no error alert detected. "
+                                "Form may have silent validation or branching."
+                            ),
+                            "all_pages": all_pages,
+                        },
+                        indent=2,
+                        ensure_ascii=False,
+                    )
+                )
+                return 4
 
             page_number += 1
 

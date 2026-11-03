@@ -251,3 +251,32 @@ def test_has_validation_error_disabled_button(page, multipage_html) -> None:
     error = has_validation_error(page)
     assert error is not None
     assert "disabled" in error.lower() or "required" in error.lower()
+
+
+def test_click_next_returns_false_when_page_unchanged(page):
+    """Regression: click_next must return False if page content doesn't change.
+
+    Bug: infinite loop on Form QA Multi-Page, page 2-24 identical to page 1.
+    click_next returned True even though form blocked navigation (silent
+    validation).
+
+    Fix: capture signature before/after, verify change.
+    """
+    from formpilot.scraper import click_next
+
+    html = """
+    <!DOCTYPE html><html><body>
+      <div role="main">
+        <div role="listitem">
+          <div role="heading" aria-level="3">NIM?</div>
+          <input type="text" />
+        </div>
+        <div role="button" onclick="noop()">Berikutnya</div>
+      </div>
+      <script>function noop() { /* does nothing — simulates blocked validation */ }</script>
+    </body></html>
+    """
+    page.set_content(html, wait_until="domcontentloaded")
+    result = click_next(page)
+    # Should detect that page didn't change
+    assert result is False
