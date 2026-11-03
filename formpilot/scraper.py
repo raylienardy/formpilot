@@ -312,21 +312,41 @@ def extract_questions(page: Page, page_number: int = 1) -> ExtractedForm:
 def fill_answers(page: Page, questions: list[Question], answers: list[Answer]) -> int:
     """Fill answers into current page. Skip needs_cli=True or empty values.
 
+    Maps answers to DOM items by q.index (not positional zip), because
+    DOM may include auxiliary listitems (headers, images) that are skipped
+    during extraction but still occupy listitem positions.
+
     Returns: number of fields successfully filled.
     """
     items = [item for item in page.locator('div[role="listitem"]').all() if item.is_visible()]
-    if len(items) != len(questions):
+    if len(items) < len(questions):
         logger.warning(
             "Item count mismatch: %d DOM items, %d questions",
             len(items),
             len(questions),
         )
 
+    answers_by_index = {a.question_index: a for a in answers}
     filled = 0
-    for item, q, a in zip(items, questions, answers, strict=False):
-        if a.needs_cli or not a.value:
-            logger.debug("Skip Q%d (needs_cli=%s, value=%r)", q.index, a.needs_cli, a.value)
+
+    for q in questions:
+        if q.index >= len(items):
+            logger.warning(
+                "Q%d index %d out of DOM range (len=%d) — skipping",
+                q.index, q.index, len(items),
+            )
             continue
+        a = answers_by_index.get(q.index)
+        if a is None:
+            logger.warning("Q%d has no matching answer — skipping", q.index)
+            continue
+        if a.needs_cli or not a.value:
+            logger.debug(
+                "Skip Q%d (needs_cli=%s, value=%r)",
+                q.index, a.needs_cli, a.value,
+            )
+            continue
+        item = items[q.index]
         try:
             _fill_single(item, q, a.value)
             filled += 1
@@ -506,9 +526,9 @@ def _detect_field_type(item) -> tuple[FieldType, list[str]]:
             return FieldType.LINEAR_SCALE, options
         return FieldType.RADIO, options
 
-    checkbox_group = item.locator('div[role="group"]')
-    if checkbox_group.count() > 0 and item.locator('div[role="checkbox"]').count() > 0:
-        options = _extract_options_from_group(checkbox_group.first, role="checkbox")
+    # Checkbox — try direct first (modern Google Forms has no group wrapper)
+    if item.locator('div[role="checkbox"]').count() > 0:
+        options = _extract_options_from_group(item, role="checkbox")
         return FieldType.CHECKBOX, options
 
     if item.locator('div[role="listbox"]').count() > 0:
@@ -518,8 +538,14 @@ def _detect_field_type(item) -> tuple[FieldType, list[str]]:
 
 
 def _extract_options_from_group(group, role: str) -> list[str]:
+    """Extract option labels from a radiogroup, checkbox group, or direct role.
+
+    Works whether `group` is a wrapper (radiogroup/group) OR the listitem
+    itself (modern Google Forms checkbox has no wrapper).
+    """
     options: list[str] = []
-    for opt in group.locator(f'div[role="{role}"]').all():
+    opts = group.locator(f'div[role="{role}"]').all()
+    for opt in opts:
         label = opt.get_attribute("aria-label") or opt.inner_text().strip()
         if label:
             options.append(label)

@@ -170,6 +170,66 @@ def test_fill_radio(page, multipage_html) -> None:
     assert filled == 1
 
 
+def test_fill_answers_sparse_indices():
+    """Regression: fill_answers must use q.index, not positional zip.
+
+    Bug: DOM with auxiliary listitems (headers) causes sparse q.index
+    (0, 1, 5 with 6 DOM items). Positional zip paired Q5 answer with
+    item[2] (auxiliary), causing fill timeout.
+    """
+    from formpilot.memory.schema import Answer, FieldType, Question
+    from formpilot.scraper import fill_answers
+
+    html = """
+    <!DOCTYPE html><html><body>
+      <div role="main">
+        <div role="listitem">
+          <div role="heading" aria-level="3">Q1?</div>
+          <input type="text" id="q1" />
+        </div>
+        <div role="listitem">
+          <!-- auxiliary: header (visible, no heading) -->
+          <div style="width: 100px; height: 20px">Section</div>
+        </div>
+        <div role="listitem">
+          <!-- auxiliary: image (visible, no heading) -->
+          <div style="width: 100px; height: 20px">Banner</div>
+        </div>
+        <div role="listitem">
+          <!-- auxiliary: spacer (visible, no heading) -->
+          <div style="width: 100px; height: 20px">Spacer</div>
+        </div>
+        <div role="listitem">
+          <div role="heading" aria-level="3">Q2?</div>
+          <input type="text" id="q2" />
+        </div>
+      </div>
+    </body></html>
+    """
+
+    playwright = sync_playwright().start()
+    browser = playwright.chromium.launch(headless=True)
+    page = browser.new_context().new_page()
+    try:
+        page.set_content(html, wait_until="domcontentloaded")
+        # Questions have sparse indices 0 and 4 (matching DOM positions)
+        qs = [
+            Question(index=0, text="Q1?", field_type=FieldType.SHORT_TEXT),
+            Question(index=4, text="Q2?", field_type=FieldType.SHORT_TEXT),
+        ]
+        ans = [
+            Answer(question_index=0, value="A1", source="user", confidence=1.0),
+            Answer(question_index=4, value="A2", source="user", confidence=1.0),
+        ]
+        filled = fill_answers(page, qs, ans)
+        assert filled == 2
+        assert page.input_value("#q1") == "A1"
+        assert page.input_value("#q2") == "A2"
+    finally:
+        browser.close()
+        playwright.stop()
+
+
 def test_click_next_disabled_returns_false(page, multipage_html) -> None:
     """click_next returns False if button is disabled (no 30s timeout)."""
     page.set_content(multipage_html, wait_until="domcontentloaded")
