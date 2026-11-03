@@ -6,6 +6,7 @@ Integration tests use real Ollama (skip if not running).
 
 from __future__ import annotations
 
+import contextlib
 from unittest.mock import Mock, patch
 
 import pytest
@@ -39,7 +40,7 @@ def _warmup_ollama_if_available():
     """
     if not _ollama_available_session_scoped():
         return  # unit tests will still run
-    try:
+    with contextlib.suppress(Exception):
         requests.post(
             "http://localhost:11434/api/generate",
             json={
@@ -50,8 +51,6 @@ def _warmup_ollama_if_available():
             },
             timeout=180,
         )
-    except Exception:  # noqa: BLE001
-        pass  # warmup failure should not block tests
 
 
 def _ollama_available_session_scoped() -> bool:

@@ -4,76 +4,72 @@ Memori kerja project. Setiap sesi WAJIB update di sini. Sesi berikutnya baca fil
 
 ## Status Saat Ini
 
-**Fase:** Fase 3 Selesai (Real LLM Integration — Sesi 5-Koreksi)
+**Fase:** Fase 2.7 Selesai (CDP Mode for Login-Required Forms)
 **Iterasi aktif:** `tasks/current/prd.md` — Iterasi 1
-**Kode fungsional:** `formpilot/scraper.py`, `formpilot/brain.py` (real LLM), `formpilot/__main__.py` (dengan `--ai` flag)
+**Kode fungsional:** `formpilot/scraper.py`, `formpilot/brain.py` (real LLM), `formpilot/__main__.py` (dengan `--ai`, `--dummy-fill`, `--cdp-url`)
 **Blocker:** Tidak ada
 
 ## Log Sesi
 
-### 2026-11-02 — Sesi 5-Koreksi (Fix Fase 3: Real LLM Integration)
+### 2026-11-03 — Sesi 5.7 & 5.8 (CDP Mode — Login-Required Forms)
 
 **Konteks:**
-Commit `b8fbf9f` mengklaim "Fase 3 Selesai" tetapi sebenarnya hanya stub:
-`_resolve_single_question` tidak memanggil LLM, `__main__.py` tidak integrasi, semua test mock.
+Form "Test Bot 4" memerlukan Google login (setting "Limit to 1 response" atau "Collect email"). Playwright stealth biasa tidak bisa handle karena form men-disable input untuk user yang belum login.
 
-**Selesai di sesi koreksi:**
-- `config/example.yaml`: model fix `qwen2.5:7b-instruct` → `qwen2.5:7b` (tag valid di Ollama)
-- `formpilot/brain.py`: **REWRITE** — `_resolve_single_question` sekarang memanggil `call_ollama()` untuk semua tipe field (text, radio, checkbox, linear_scale), dengan validasi output + `<UNKNOWN>` escalation pattern
-- `formpilot/prompts/*.txt`: rewrite lengkap (text, radio, checkbox, linear_scale)
-- `formpilot/__main__.py`: tambah flag `--ai` (opt-in), integrasi dengan brain
-- `tests/test_brain.py`: tambah 4 integration tests (auto-skip jika Ollama tidak jalan)
-- `scripts/verify_brain.py`: skrip verifikasi manual (5 kasus, harus PASS semua)
-- `docs/REQUIREMENTS.md`: fix model reference
+**Root cause terkonfirmasi:**
+- Fingerprint stealth bersih (`webdriver=None, plugins=5, platform=Win32`)
+- Tapi body form menampilkan "Sign in to continue" → input disabled
+- **Bukan anti-bot detection** — ini authentication state
 
-**Verifikasi (setelah sesi koreksi):**
-- `pytest -v -m "not integration"`: 49 passed
-- `pytest -m integration`: 4 passed (setelah warmup fixture)
-- `pytest -v`: 53 passed
-- `python scripts/verify_brain.py`: ALL CHECKS PASSED
-- `ruff check formpilot/ tests/ scripts/`: All checks passed!
-- **Manual form test (form multi-halaman 3 section):**
-  - Navigasi 3 halaman otomatis: ✅
-  - `required: true` untuk NIM: ✅ (fix Fase 2 verified)
-  - `total_pages_estimate: 3`: ✅ (fix Fase 2 verified)
-  - NIM → llm_unknown: ✅ (no hallucination, correct escalation)
-  - Jurusan → llm_unknown: ✅ (correct — LLM tidak tahu jurusan user)
-  - Motivasi → llm_unknown: ✅ (correct — LLM tidak tahu motivasi user)
-  - Semua jawaban `needs_cli: true`: ✅ (EXPECTED behavior tanpa memory)
-  - Total waktu: [isi detik]
+**Solusi:**
+CDP (Chrome DevTools Protocol) attach ke Edge/Chrome yang sudah login.
+
+**Selesai:**
+- `scraper.py`: `open_form_via_cdp(cdp_url, url)` — attach ke existing browser via CDP
+- `__main__.py`: flag `--cdp-url` untuk switch mode CDP vs stealth-launch
+- `scraper.py`: `_fill_single` fail-fast 3s + diagnostic log disabled inputs (Sesi 5.5)
+- `tests/test_real_form.py`: integration test (auto-skip jika TEST_FORM_URL tidak diset)
+
+**Verifikasi:**
+- `pytest -v -m "not integration"`: 54 passed
+- `pytest -m integration`: 4 passed (Ollama integration)
+- `ruff check formpilot/ tests/ scripts/`: clean
+- **Manual test CDP mode:**
+  ```
+  ✅ Port 9222 READY (Edge Edg/156.0.4314.58)
+  ✅ Attached to context with 1 existing pages
+  ✅ Form loaded via CDP: Test Bot 4
+  ✅ Filled 1/1 fields
+  ✅ JSON fields_filled: 1
+  ```
+- Form "Nama?" terisi manual bisa diketik → confirm login state valid
+- Form terisi otomatis oleh FormPilot via CDP → confirm automation works
 
 **Keputusan:**
-- `<UNKNOWN>` escalation adalah **perilaku yang diinginkan**, bukan bug
-- Fase 4 (memory) akan mengisi gap: pertanyaan personal dijawab dari memory setelah user jawab sekali via CLI
-- Warmup fixture ditambahkan di test_brain.py untuk handle cold start Ollama (30-90s load pertama)
+- **CDP mode** = primary path untuk form yang butuh login (mayoritas kuisioner kampus)
+- **Stealth open_form** = fallback untuk form public (tanpa login)
+- **Auto-fallback** tidak diperlukan; user pilih via `--cdp-url` flag
+- User perlu launch Edge dengan `--remote-debugging-port=9222` manual sebelum run
 
 **Known Limitations:**
-- **Tanpa memory (Fase 4), semua pertanyaan personal → `llm_unknown`** — desain, bukan bug
-- **`--dummy-fill` adalah placeholder untuk testing** — Fase 4 akan replace dengan CLI loop yang tanya user
+- **CDP mode butuh manual setup:** launch Edge dengan debug port + login Google sekali
+- **Stealth mode masih ada** untuk form public (tidak optimal untuk form login)
+- **Multi-page navigation via CDP** belum diverifikasi dengan form asli multi-halaman + login (form "Test Bot 4" hanya 1 halaman)
 - **Dropdown filling** belum diimplementasi (Fase 4)
-- **`UNKNOWN` detection dilonggarkan** — perlu diperketat di Fase 4
-- **`total_pages_estimate` bisa `null`** jika Google Forms tidak menampilkan "Bagian X dari Y" (kadang hanya via tombol navigasi)
+- **`--dummy-fill` adalah placeholder** — Fase 4 akan replace dengan CLI loop yang tanya user
 
-**Berikutnya (Sesi 6 — Fase 4: Memory System):**
+**Berikutnya (Sesi 6a — Fase 4.1: SQLite Store):**
 - Implementasi `formpilot/memory/sqlite_store.py`
-- Implementasi `formpilot/memory/vector_store.py`
-- Integrasi memory ke `brain.py` (sebelum panggil LLM, cek dulu)
-- CLI loop untuk needs_cli
+- Skema: tabel `profile`, `sessions`, `pending_questions`
+- CRUD: `get_profile_field`, `set_profile_field`, `get_all_profile`
+- Fungsi: `log_session`, `save_pending_question`
+- Test dengan fixtures, tanpa integrasi brain dulu
 
 **Blocker:** (tidak ada)
-
-**Anti-bot detection (Sesi 5.6):**
-- **Root cause**: `navigator.webdriver=true` → Google Forms disables inputs
-- **Fix**: stealth launch (msedge/chrome channel + init script masking webdriver, plugins, languages + realistic UA + AutomationControlled flag disabled)
-- **Verifikasi**: [ISI SETELAH TEST] — input terisi / masih gagal
-
-- **Anti-bot detection**: Google Forms actively detects automation. Stealth mitigations applied but not 100% guaranteed — Google may update detection. If inputs still disabled after stealth, fallback to playwright-stealth package needed.
 
 ---
 
 ## Dokumen Referensi
-
-Fondasi v2 lengkap. Navigasi:
 
 - **Agent baru wajib baca:** `docs/AGENT-BRIEF.md`
 - **Peta dokumen:** `docs/INDEX.md`

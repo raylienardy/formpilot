@@ -23,6 +23,7 @@ from formpilot.scraper import (
     fill_answers,
     has_validation_error,
     open_form,
+    open_form_via_cdp,
 )
 from formpilot.utils.config_loader import ConfigError, load_config
 from formpilot.utils.logger import get_logger, setup_logger
@@ -50,6 +51,15 @@ def main() -> int:
         help="In --ai mode: fill needs_cli with placeholders (TEST ONLY)",
     )
     parser.add_argument("--config", default="./config/production.yaml")
+    parser.add_argument(
+        "--cdp-url",
+        default=None,
+        help=(
+            "Attach to existing Chrome/Edge via CDP "
+            "(e.g., http://localhost:9222). Use when form requires Google login. "
+            "Launch browser first with: chrome.exe --remote-debugging-port=9222"
+        ),
+    )
     args = parser.parse_args()
 
     setup_logger("formpilot", level="INFO")
@@ -70,7 +80,11 @@ def main() -> int:
 
     page = None
     try:
-        page = open_form(args.url, headless=not args.headed)
+        if args.cdp_url:
+            logger.info("Using CDP mode: attaching to existing browser")
+            page = open_form_via_cdp(args.cdp_url, args.url)
+        else:
+            page = open_form(args.url, headless=not args.headed)
 
         all_pages: list[dict] = []
         page_number = 1

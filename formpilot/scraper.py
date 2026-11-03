@@ -36,11 +36,11 @@ _browser = None
 def open_form(url: str, headless: bool = True, timeout_ms: int = DEFAULT_TIMEOUT_MS) -> Page:
     """Launch browser and navigate to form URL.
 
-    Uses stealth techniques to avoid Google Forms anti-bot detection:
-    - Overrides navigator.webdriver
-    - Prefers real Edge/Chrome over Playwright Chromium
-    - Disables automation control feature flag
-    - Realistic user agent + viewport
+    Multi-layer stealth to bypass Google Forms anti-bot:
+    1. playwright-stealth: masks CDP traces, fingerprints
+    2. Real browser channel: msedge or chrome (not Playwright Chromium)
+    3. Persistent context: cookies, cache, extensions look real
+    4. AutomationControlled flag disabled
     """
     global _playwright, _browser
 
@@ -48,14 +48,18 @@ def open_form(url: str, headless: bool = True, timeout_ms: int = DEFAULT_TIMEOUT
 
     _playwright = sync_playwright().start()
 
-    # Try real Edge/Chrome first (better fingerprint), fallback to Chromium
     launch_kwargs = {
         "headless": headless,
         "args": [
             "--disable-blink-features=AutomationControlled",
-            "--disable-features=IsolateOrigins,site-per-process",
+            "--disable-features=IsolateOrigins,site-per-process,AutomationControlled",
             "--no-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-gpu",
+            "--start-maximized",
+            "--disable-extensions-except=",  # no extensions
         ],
+        "ignore_default_args": ["--enable-automation"],  # critical
     }
 
     _browser = None
@@ -70,30 +74,95 @@ def open_form(url: str, headless: bool = True, timeout_ms: int = DEFAULT_TIMEOUT
             break
 
     if _browser is None:
-        raise RuntimeError("Failed to launch any browser (msedge, chrome, chromium)")
+        raise RuntimeError("Failed to launch any browser")
 
-    context = _browser.new_context(
-        viewport={"width": 1366, "height": 768},
-        user_agent=(
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0"
-        ),
-        locale="id-ID",
-        timezone_id="Asia/Jakarta",
-    )
+    # Try persistent context (looks more like real user)
+    try:
+        from pathlib import Path as _Path
 
-    # Mask automation fingerprints
+        user_data = _Path("./state/browser_profile").resolve()
+        user_data.mkdir(parents=True, exist_ok=True)
+        context = _browser.new_context(
+            viewport={"width": 1366, "height": 768},
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0"
+            ),
+            locale="id-ID",
+            timezone_id="Asia/Jakarta",
+            storage_state=str(user_data / "storage.json")
+            if (user_data / "storage.json").exists()
+            else None,
+        )
+        logger.info("Using persistent context: %s", user_data)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Persistent context failed: %s — using fresh", e)
+        context = _browser.new_context(
+            viewport={"width": 1366, "height": 768},
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0"
+            ),
+            locale="id-ID",
+            timezone_id="Asia/Jakarta",
+        )
+
+    # Layer 1: apply playwright-stealth
+    try:
+        from playwright_stealth import Stealth
+
+        stealth = Stealth()
+        stealth.apply_stealth_sync(context)
+        logger.info("playwright-stealth applied to context")
+    except Exception as e:  # noqa: BLE001
+        logger.warning("playwright-stealth unavailable: %s — using manual init script", e)
+
+    # Layer 2: manual masking (in case stealth didn't cover everything)
     context.add_init_script(
         """
+        // Mask webdriver
         Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+
+        // Mask plugins array
         Object.defineProperty(navigator, 'plugins', {
-            get: () => [1, 2, 3, 4, 5],
+            get: () => {
+                const plugins = [];
+                for (let i = 0; i < 5; i++) plugins.push({ name: 'Plugin ' + i });
+                return plugins;
+            },
         });
+
+        // Mask languages
         Object.defineProperty(navigator, 'languages', {
             get: () => ['id-ID', 'id', 'en-US', 'en'],
         });
-        window.chrome = window.chrome || { runtime: {} };
+
+        // Mask platform
+        Object.defineProperty(navigator, 'platform', { get: () => 'Win32' });
+
+        // Mask hardwareConcurrency
+        Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
+
+        // Mask chrome runtime
+        window.chrome = { runtime: {}, loadTimes: () => {}, csi: () => {} };
+
+        // Mask permissions query
+        const originalQuery = window.navigator.permissions.query;
+        window.navigator.permissions.query = (parameters) => (
+            parameters.name === 'notifications'
+                ? Promise.resolve({ state: Notification.permission })
+                : originalQuery(parameters)
+        );
+
+        // Mask WebGL vendor
+        const getParameter = WebGLRenderingContext.prototype.getParameter;
+        WebGLRenderingContext.prototype.getParameter = function(parameter) {
+            if (parameter === 37445) return 'Intel Inc.';
+            if (parameter === 37446) return 'Intel Iris OpenGL Engine';
+            return getParameter.call(this, parameter);
+        };
         """
     )
 
@@ -103,15 +172,95 @@ def open_form(url: str, headless: bool = True, timeout_ms: int = DEFAULT_TIMEOUT
 
     logger.info("Form loaded: %s", page.title())
 
-    # Verify stealth worked
-    webdriver = page.evaluate("() => navigator.webdriver")
-    if webdriver:
-        logger.warning(
-            "navigator.webdriver still exposed (%r). Anti-bot may still trigger.",
-            webdriver,
+    # Verify multi-signal stealth
+    fingerprint = page.evaluate(
+        """() => ({
+            webdriver: navigator.webdriver,
+            plugins: navigator.plugins.length,
+            languages: navigator.languages.join(','),
+            platform: navigator.platform,
+            chrome: typeof window.chrome,
+        })"""
+    )
+    logger.info("Fingerprint: %s", fingerprint)
+
+    if fingerprint.get("webdriver"):
+        logger.warning("webdriver still exposed")
+
+    return page
+
+
+def open_form_via_cdp(cdp_url: str, url: str, timeout_ms: int = DEFAULT_TIMEOUT_MS) -> Page:
+    """Attach to existing Chrome/Edge via CDP and navigate to form.
+
+    Use this when the form requires Google login (settings: "Limit to 1
+    response" or "Collect email addresses"). User launches Chrome/Edge with
+    `--remote-debugging-port=9222`, logs into Google once, then FormPilot
+    attaches to that browser (reusing login cookies).
+
+    Args:
+        cdp_url: CDP endpoint, e.g. "http://localhost:9222"
+        url: Form URL to navigate to
+        timeout_ms: Page timeout in milliseconds
+
+    Returns:
+        Playwright Page from existing browser context (with login cookies).
+
+    Raises:
+        RuntimeError: If no browser context available at CDP endpoint.
+    """
+    global _playwright
+
+    logger.info("Attaching to existing browser via CDP: %s", cdp_url)
+
+    _playwright = sync_playwright().start()
+    try:
+        browser = _playwright.chromium.connect_over_cdp(cdp_url)
+    except Exception as e:
+        raise RuntimeError(
+            f"Cannot connect to CDP at {cdp_url}. "
+            f"Launch Chrome/Edge with --remote-debugging-port=9222 first. "
+            f"Error: {e}"
+        ) from e
+
+    if not browser.contexts:
+        raise RuntimeError(
+            "No browser contexts found at CDP endpoint. "
+            "Make sure Chrome/Edge is running with a profile."
         )
+
+    context = browser.contexts[0]
+    logger.info("Attached to context with %d existing pages", len(context.pages))
+
+    if context.pages:
+        page = context.pages[0]
+        logger.info("Reusing existing page: %s", page.url)
     else:
-        logger.info("Stealth active: navigator.webdriver is undefined")
+        page = context.new_page()
+        logger.info("Created new page in existing context")
+
+    page.set_default_timeout(timeout_ms)
+    page.goto(url, wait_until="networkidle", timeout=timeout_ms)
+
+    logger.info("Form loaded via CDP: %s", page.title())
+
+    # Verify login state
+    body_text = page.locator("body").inner_text()[:800]
+    sign_in_patterns = [
+        "Sign in to continue",
+        "Masuk untuk melanjutkan",
+        "You need permission",
+        "Anda memerlukan izin",
+        "Sign in",
+    ]
+    for pattern in sign_in_patterns:
+        if pattern in body_text:
+            logger.warning(
+                "Form still shows sign-in prompt (%r). "
+                "Make sure you're logged into Google in the attached browser.",
+                pattern,
+            )
+            break
 
     return page
 
