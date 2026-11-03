@@ -16,6 +16,8 @@ import sys
 
 from formpilot.brain import BrainError, check_ollama_ready, resolve_questions
 from formpilot.memory.schema import Answer, FieldType, Question
+from formpilot.memory.sqlite_store import SqliteStore
+from formpilot.memory.vector_store import VectorStore
 from formpilot.scraper import (
     click_next,
     close,
@@ -45,6 +47,7 @@ def main() -> int:
     parser.add_argument("--url", required=True)
     parser.add_argument("--headed", action="store_true")
     parser.add_argument("--ai", action="store_true")
+    parser.add_argument("--use-memory", action="store_true", help="Use SQLite/ChromaDB memory.")
     parser.add_argument(
         "--dummy-fill",
         action="store_true",
@@ -66,12 +69,27 @@ def main() -> int:
     logger = get_logger("formpilot.__main__")
 
     config = None
-    if args.ai:
+    if args.ai or args.use_memory:
         try:
             config = load_config(args.config)
-            check_ollama_ready(config)
+            if args.ai:
+                check_ollama_ready(config)
         except (ConfigError, BrainError) as e:
-            print(f"AI setup failed: {e}", file=sys.stderr)
+            print(f"Setup failed: {e}", file=sys.stderr)
+            return 2
+
+    sqlite_store = None
+    vector_store = None
+    if args.use_memory and config is not None:
+        try:
+            sqlite_store = SqliteStore(config.memory.sqlite_path)
+            vector_store = VectorStore(
+                chroma_path=config.memory.chroma_path,
+                ollama_base_url=config.ollama.base_url,
+                embedding_model=config.ollama.embedding_model,
+            )
+        except Exception as e:
+            print(f"Memory setup failed: {e}", file=sys.stderr)
             return 2
 
     if args.dummy_fill and not args.ai:
@@ -95,7 +113,12 @@ def main() -> int:
             page_dict = extracted.model_dump(mode="json")
 
             if args.ai and config is not None:
-                answers = resolve_questions(config, extracted.questions)
+                answers = resolve_questions(
+                    config,
+                    extracted.questions,
+                    sqlite_store=sqlite_store,
+                    vector_store=vector_store,
+                )
 
                 if args.dummy_fill:
                     for i, a in enumerate(answers):

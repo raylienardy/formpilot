@@ -18,7 +18,9 @@ from pathlib import Path
 
 import requests
 
-from formpilot.memory.schema import Answer, FieldType, Question
+from formpilot.memory.schema import Answer, FieldType, MemoryHit, Question
+from formpilot.memory.sqlite_store import SqliteStore
+from formpilot.memory.vector_store import VectorStore
 from formpilot.utils.config_loader import AppConfig
 from formpilot.utils.logger import get_logger
 
@@ -99,32 +101,32 @@ def call_ollama(config: AppConfig, prompt: str, system_prompt: str = "") -> str:
     return text
 
 
-def resolve_questions(config: AppConfig, questions: list[Question]) -> list[Answer]:
-    """Resolve a list of questions using the LLM.
+def resolve_questions(
+    config: AppConfig,
+    questions: list[Question],
+    sqlite_store: SqliteStore | None = None,
+    vector_store: VectorStore | None = None,
+) -> list[Answer]:
+    """Resolve a list of questions using memory or LLM."""
+    return [_resolve_single_question(config, q, sqlite_store, vector_store) for q in questions]
 
-    Args:
-        config: App configuration.
-        questions: List of questions to answer.
 
-    Returns:
-        List of Answer objects (same length as questions, same order).
+def _resolve_single_question(
+    config: AppConfig,
+    q: Question,
+    sqlite_store: SqliteStore | None = None,
+    vector_store: VectorStore | None = None,
+) -> Answer:
+    """Resolve a single question via Memory or LLM.
+
+    Strategy:
+    1. Check SQLite for exact keyword match (if sqlite_store provided).
+    2. Check VectorStore for semantic match (if vector_store provided).
+    3. Fallback to LLM if no memory hit found.
+    4. Validate memory hits for RADIO/DROPDOWN if necessary.
     """
-    return [_resolve_single_question(config, q) for q in questions]
-
-
-def _resolve_single_question(config: AppConfig, q: Question) -> Answer:
-    """Resolve a single question via LLM.
-
-    Strategy per field type:
-    - SHORT_TEXT / PARAGRAPH: LLM generates short/narrative answer.
-      If LLM cannot (needs personal info), returns <UNKNOWN> → needs_cli=True.
-    - RADIO / DROPDOWN: LLM selects one option; validated against q.options.
-    - CHECKBOX: LLM selects multiple options; validated.
-    - LINEAR_SCALE: LLM picks a number in range; validated.
-    - UNKNOWN / has_media: skip → needs_cli=True.
-    """
-    if q.has_media:
-        logger.info("Question %d has media — escalate to user", q.index)
+    if q.has_media or q.field_type == FieldType.UNKNOWN:
+        logger.info("Question %d has media/unknown — escalate to user", q.index)
         return Answer(
             question_index=q.index,
             value="",
@@ -133,15 +135,22 @@ def _resolve_single_question(config: AppConfig, q: Question) -> Answer:
             confidence=0.0,
         )
 
-    if q.field_type == FieldType.UNKNOWN:
-        return Answer(
-            question_index=q.index,
-            value="",
-            source="skip",
-            needs_cli=True,
-            confidence=0.0,
-        )
+    # 1. Memory Lookups
+    if sqlite_store:
+        sqlite_hits = sqlite_store.find_relevant(q.text)
+        if sqlite_hits and sqlite_hits[0].similarity >= 0.6:
+            hit = sqlite_hits[0]
+            logger.info("Memory hit (SQLite) for Q%d: %s", q.index, hit.answer)
+            return _handle_memory_hit(q, hit, sqlite_store, vector_store)
 
+    if vector_store:
+        vector_hits = vector_store.search_similar(q.text, top_k=1, min_similarity=0.6)
+        if vector_hits:
+            hit = vector_hits[0]
+            logger.info("Memory hit (Chroma) for Q%d: %s", q.index, hit.answer)
+            return _handle_memory_hit(q, hit, sqlite_store, vector_store)
+
+    # 2. LLM Fallback
     try:
         if q.field_type in (FieldType.SHORT_TEXT, FieldType.PARAGRAPH):
             return _resolve_text(config, q)
@@ -165,6 +174,43 @@ def _resolve_single_question(config: AppConfig, q: Question) -> Answer:
         question_index=q.index,
         value="",
         source="skip",
+        needs_cli=True,
+        confidence=0.0,
+    )
+
+
+def _handle_memory_hit(
+    q: Question,
+    hit: MemoryHit,
+    sqlite_store: SqliteStore | None,
+    vector_store: VectorStore | None,
+) -> Answer:
+    """Validate and return a memory hit."""
+    if q.field_type in (FieldType.SHORT_TEXT, FieldType.PARAGRAPH):
+        return Answer(
+            question_index=q.index,
+            value=hit.answer,
+            source=hit.source,
+            needs_cli=False,
+            confidence=min(hit.similarity, 0.9),
+        )
+
+    if q.field_type in (FieldType.RADIO, FieldType.DROPDOWN):
+        matched = _match_option(hit.answer, q.options)
+        if matched:
+            return Answer(
+                question_index=q.index,
+                value=matched,
+                source=f"{hit.source}_validated",
+                needs_cli=False,
+                confidence=min(hit.similarity, 0.9),
+            )
+        logger.info("Memory hit invalid for Q%d options: %s", q.index, hit.answer)
+
+    return Answer(
+        question_index=q.index,
+        value="",
+        source="memory_invalid",
         needs_cli=True,
         confidence=0.0,
     )

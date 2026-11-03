@@ -103,6 +103,53 @@ CDP (Chrome DevTools Protocol) attach ke Edge/Chrome yang sudah login.
 
 ---
 
+### 2026-11-03 — Sesi 6b (Vector Store — ChromaDB)
+
+**Selesai:**
+- `formpilot/memory/vector_store.py`: `VectorStore` class using ChromaDB
+  - `_embed`: Ollama nomic-embed-text via /api/embeddings
+  - `add_answer`: insert with UUID, metadata (question, category, timestamp)
+  - `search_similar`: cosine search with min_similarity filter
+  - `count`, `clear` (for testing)
+- `tests/test_vector_store.py`: unit tests (mocked embed) + integration tests (real Ollama, auto-skip)
+- `pyproject.toml`: added `chromadb>=0.5` dependency
+- Prerequisite: `ollama pull nomic-embed-text` (done)
+
+**Verifikasi:**
+- `pytest tests/test_vector_store.py -v -m \"not integration\"`: passed
+- `pytest -v -m \"not integration\"`: passed total
+- `pytest -m integration`: integration tests passed if nomic-embed-text available
+- `ruff check formpilot/ tests/ scripts/`: clean
+
+**Keputusan:**
+- Chroma cosine distance → similarity conversion: `1 - (dist / 2)` (range [0,1])
+- `min_similarity` threshold as filter (default 0.0, caller can raise)
+- UUID auto-generated per answer (no manual ID management)
+- Metadata: question (original), category (optional), timestamp (ISO)
+
+**Known Limitations:**
+- No update / delete per-document (only `clear` for all)
+- No pagination in search (returns top_k only)
+- Embedding dimension fixed by nomic-embed-text (768)
+
+### 2026-11-03 — Sesi 6c (Memory Integration into Brain & CLI)
+
+**Selesai:**
+- `formpilot/brain.py`: Updated `resolve_questions` and `_resolve_single_question` to accept `sqlite_store` and `vector_store`.
+  - Resolution priority: SQLite keyword match (>=0.6) → Chroma semantic search (>=0.6) → LLM fallback.
+  - Validation of retrieved memory answers against options for RADIO/DROPDOWN fields.
+- `formpilot/__main__.py`: Added `--use-memory` flag, which initializes `SqliteStore` and `VectorStore` based on configuration paths and passes them to `resolve_questions`.
+- `tests/test_brain_memory.py`: Added unit tests verifying SQLite priority, Chroma fallback, and LLM fallback.
+
+**Verifikasi:**
+- `pytest -v -m "not integration"`: 98 passed successfully.
+- `pytest -m integration`: 6 passed, 1 skipped.
+
+**Berikutnya (Fase 5 — End-to-End CLI / Interactive loop):**
+- `formpilot/cli.py`: Full interactive CLI loop with Rich UI for `needs_cli` questions, saving answers back to SQLite/ChromaDB.
+
+---
+
 ## Dokumen Referensi
 
 - **Agent baru wajib baca:** `docs/AGENT-BRIEF.md`
