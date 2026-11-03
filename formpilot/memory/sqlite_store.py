@@ -14,6 +14,7 @@ Design notes (see ADR-005):
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -148,7 +149,7 @@ class SqliteStore:
 
         This is a naive fallback. ChromaDB (Sesi 6b) will do semantic search.
         """
-        keywords = [w.lower() for w in question_text.split() if len(w) >= 3 and w.isalnum()]
+        keywords = [w.lower() for w in re.findall(r"\w+", question_text) if len(w) >= 3]
         if not keywords:
             return []
 

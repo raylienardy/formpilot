@@ -105,6 +105,26 @@ def test_find_relevant_matches_key(store):
     assert any(h.answer == "12345" for h in hits)
 
 
+def test_find_relevant_single_word_with_punctuation(store):
+    """Regression: single-word question with punctuation must match.
+
+    Bug discovered in manual test: 'Nama?' filtered out as keyword because
+    'Nama?'.isalnum() is False. Fixed by using re.findall(r'\\w+', ...).
+    """
+    store.set_profile_field("nama", "Budi", "identity")
+    hits = store.find_relevant("Nama?")
+    assert len(hits) >= 1
+    assert hits[0].answer == "Budi"
+
+
+def test_find_relevant_short_question_with_question_mark(store):
+    """Cover 'NIM?' style questions."""
+    store.set_profile_field("nim", "12345", "academic")
+    hits = store.find_relevant("NIM?")
+    assert len(hits) >= 1
+    assert hits[0].answer == "12345"
+
+
 def test_find_relevant_matches_value(store):
     store.set_profile_field("nama_lengkap", "Budi Santoso", "identity")
     hits = store.find_relevant("Nama Budi siapa?")
