@@ -46,3 +46,9 @@ Thumbs.db
 !tasks/
 !README.md
 !models/.gitkeep
+
+# --- Test artifacts (smoke test / manual test leftovers) ---
+test_vs/
+test_mem.db
+test.db
+*.sqlite3
