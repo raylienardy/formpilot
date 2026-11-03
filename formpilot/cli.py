@@ -197,9 +197,7 @@ def _ask_choice(console: Console, q: Question) -> str:
             idx = int(raw) - 1
             if 0 <= idx < len(q.options):
                 return q.options[idx]
-            console.print(
-                f"[red]Nomor harus antara 1 dan {len(q.options)}[/red]"
-            )
+            console.print(f"[red]Nomor harus antara 1 dan {len(q.options)}[/red]")
             continue
         # Otherwise try exact match
         for opt in q.options:
@@ -255,8 +253,7 @@ def _ask_checkbox(console: Console, q: Question) -> str:
                     unique.append(s)
             return ", ".join(unique)
         console.print(
-            f"[red]Pilihan tidak valid. Ketik nomor 1-{len(q.options)} "
-            f"dipisah koma.[/red]"
+            f"[red]Pilihan tidak valid. Ketik nomor 1-{len(q.options)} dipisah koma.[/red]"
         )
 
 

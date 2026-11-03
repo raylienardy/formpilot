@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from unittest.mock import Mock, patch
 
-import pytest
-
 from formpilot.cli import (
     _save_to_memory,
     _should_save_to_vector,
@@ -13,7 +11,6 @@ from formpilot.cli import (
     prompt_for_answers,
 )
 from formpilot.memory.schema import Answer, FieldType, Question
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -159,9 +156,7 @@ def test_prompt_empty_input_marks_skipped():
 
 
 def test_prompt_radio_by_number():
-    q = _mk_q(
-        ftype=FieldType.RADIO, options=["PTIK", "TEKOM", "PSIKOLOG"]
-    )
+    q = _mk_q(ftype=FieldType.RADIO, options=["PTIK", "TEKOM", "PSIKOLOG"])
     a = _mk_a(needs_cli=True)
     with patch("formpilot.cli.Prompt.ask", return_value="2"):
         result = prompt_for_answers([q], [a])
@@ -172,17 +167,13 @@ def test_prompt_radio_invalid_then_valid():
     q = _mk_q(ftype=FieldType.RADIO, options=["A", "B"])
     a = _mk_a(needs_cli=True)
     # First ask returns invalid, second returns valid
-    with patch(
-        "formpilot.cli.Prompt.ask", side_effect=["9", "1"]
-    ):
+    with patch("formpilot.cli.Prompt.ask", side_effect=["9", "1"]):
         result = prompt_for_answers([q], [a])
     assert result[0].value == "A"
 
 
 def test_prompt_checkbox_multiple_by_number():
-    q = _mk_q(
-        ftype=FieldType.CHECKBOX, options=["Programming", "Design", "Data"]
-    )
+    q = _mk_q(ftype=FieldType.CHECKBOX, options=["Programming", "Design", "Data"])
     a = _mk_a(needs_cli=True)
     with patch("formpilot.cli.Prompt.ask", return_value="1, 3"):
         result = prompt_for_answers([q], [a])
@@ -222,9 +213,7 @@ def test_prompt_mixed_some_not_needing_cli():
         _mk_a(0, False),  # already answered
         _mk_a(1, True),
     ]
-    ans[0] = Answer(
-        question_index=0, value="Budi", source="llm", needs_cli=False, confidence=0.9
-    )
+    ans[0] = Answer(question_index=0, value="Budi", source="llm", needs_cli=False, confidence=0.9)
     with patch("formpilot.cli.Prompt.ask", return_value="1"):
         result = prompt_for_answers(qs, ans)
     assert result[0].value == "Budi"

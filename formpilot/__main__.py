@@ -15,6 +15,7 @@ import json
 import sys
 
 from formpilot.brain import BrainError, check_ollama_ready, resolve_questions
+from formpilot.cli import prompt_for_answers
 from formpilot.memory.schema import Answer, FieldType, Question
 from formpilot.memory.sqlite_store import SqliteStore
 from formpilot.memory.vector_store import VectorStore
@@ -54,6 +55,14 @@ def main() -> int:
         help="In --ai mode: fill needs_cli with placeholders (TEST ONLY)",
     )
     parser.add_argument("--config", default="./config/production.yaml")
+    parser.add_argument(
+        "--interactive",
+        action="store_true",
+        help=(
+            "Interactively prompt for needs_cli questions via Rich. "
+            "Requires --ai. Mutually exclusive with --dummy-fill."
+        ),
+    )
     parser.add_argument(
         "--cdp-url",
         default=None,
@@ -95,6 +104,21 @@ def main() -> int:
     if args.dummy_fill and not args.ai:
         print("--dummy-fill requires --ai", file=sys.stderr)
         return 1
+    if args.interactive and not args.ai:
+        print("--interactive requires --ai", file=sys.stderr)
+        return 1
+    if args.interactive and args.dummy_fill:
+        print(
+            "--interactive and --dummy-fill are mutually exclusive",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Session logging (audit trail)
+    session_id: int | None = None
+    if sqlite_store is not None:
+        mode = "interactive" if args.interactive else "draft"
+        session_id = sqlite_store.log_session_start(args.url, mode)
 
     page = None
     try:
@@ -120,7 +144,15 @@ def main() -> int:
                     vector_store=vector_store,
                 )
 
-                if args.dummy_fill:
+                if args.interactive:
+                    answers = prompt_for_answers(
+                        extracted.questions,
+                        answers,
+                        session_id=session_id,
+                        sqlite_store=sqlite_store,
+                        vector_store=vector_store,
+                    )
+                elif args.dummy_fill:
                     for i, a in enumerate(answers):
                         if a.needs_cli:
                             answers[i] = Answer(
@@ -175,9 +207,18 @@ def main() -> int:
                 ensure_ascii=False,
             )
         )
+
+        if sqlite_store is not None and session_id is not None:
+            sqlite_store.log_session_finish(
+                session_id,
+                "success",
+                notes=f"{len(all_pages)} pages extracted",
+            )
         return 0
 
     except Exception as e:  # noqa: BLE001
+        if sqlite_store is not None and session_id is not None:
+            sqlite_store.log_session_finish(session_id, "failed", notes=str(e)[:500])
         print(f"ERROR: {e}", file=sys.stderr)
         return 1
     finally:

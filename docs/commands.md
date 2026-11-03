@@ -66,3 +66,18 @@ git commit -m "<tipe>: <deskripsi>"
 ```
 
 Tipe commit: feat, fix, docs, chore, refactor, test.
+
+### Interactive Mode (Fase 4)
+
+Prompt user untuk pertanyaan yang AI tidak bisa jawab (`needs_cli=True`). Jawaban otomatis disimpan ke memory untuk sesi berikutnya.
+
+```bash
+# First run: AI tanya NIM/jurusan, user jawab, jawaban disimpan
+python -m formpilot --url "https://docs.google.com/forms/d/e/xxx/viewform" --ai --use-memory --interactive --cdp-url "http://127.0.0.1:9222"
+
+# Second run: memory menjawab otomatis, tanpa prompt
+python -m formpilot --url "..." --ai --use-memory --interactive --cdp-url "..."
+```
+
+**Catatan:** `--interactive` requires `--ai`, mutually exclusive dengan `--dummy-fill`.
+

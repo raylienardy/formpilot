@@ -158,3 +158,36 @@ CDP (Chrome DevTools Protocol) attach ke Edge/Chrome yang sudah login.
 - **Step-by-step:** `docs/PHASES.md`
 - **Visi produk:** `docs/PRODUCT.md`
 - **Keperluan teknis:** `docs/REQUIREMENTS.md`
+### 2026-11-04 — Sesi 7a & 7b (Interactive CLI + Integration)
+
+**Sesi 7a (commit f7090b7):**
+- `formpilot/cli.py`: prompt_for_answers + Rich UI helpers
+- `tests/test_cli.py`: 20 unit tests
+- Integrity check: __main__.py NOT touched in 7a
+
+**Sesi 7b (this session):**
+- `formpilot/__main__.py`: added --interactive flag, session logging, wired prompt_for_answers
+- `tests/test_main_interactive.py`: 4 flag validation tests
+- `docs/commands.md`: interactive usage example
+
+**Verifikasi:**
+- `pytest -m "not integration"`: 122 passed
+- `pytest -m integration`: 6 passed, 1 skipped
+- `ruff check`: clean
+- Flag validation manual: works
+
+**Keputusan:**
+- `--dummy-fill` retained for quick testing (not deprecated yet)
+- Session logging only if `--use-memory`
+- Interactive answers auto-save: facts to SQLite, narratives to Chroma
+
+**Known Limitations:**
+- `pending_questions.page_number` = 0 (enhancement for future)
+- Interactive mode = draft mode (no auto-submit)
+
+**Berikutnya (Sesi 8 — Fase 5: v0.1 Release Prep):**
+- README dengan demo GIF
+- CHANGELOG.md
+- Tag v0.1.0
+- User testing (3 orang)
+
