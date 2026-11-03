@@ -138,6 +138,21 @@ def test_search_sorted_by_similarity(store):
     assert similarities == sorted(similarities, reverse=True)
 
 
+def test_search_similarity_clamped_to_one(store):
+    """Regression: similarity must never exceed 1.0 (Pydantic le=1.0).
+
+    Bug: Chroma can return slightly negative distance due to float
+    precision, making 1 - (dist/2) exceed 1.0 by ~1e-8, failing
+    Pydantic validation. Fixed by clamping to [0, 1].
+    """
+    store.add_answer("Q?", "A")
+    # Force a very similar query to trigger high similarity
+    hits = store.search_similar("Q?", top_k=5)
+    assert len(hits) >= 1
+    for hit in hits:
+        assert 0.0 <= hit.similarity <= 1.0, f"similarity {hit.similarity} out of [0, 1]"
+
+
 def test_search_has_timestamp(store):
     store.add_answer("Q?", "A")
     hits = store.search_similar("query")

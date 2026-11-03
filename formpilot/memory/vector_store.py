@@ -201,7 +201,10 @@ class VectorStore:
         for _doc_id, doc, meta, dist in zip(ids, docs, metas, distances, strict=False):
             # Chroma cosine distance: 0 = identical, 2 = opposite
             # Convert to similarity: 1 - (distance / 2), range [0, 1]
-            similarity = max(0.0, 1.0 - (dist / 2.0))
+            # Clamp to [0, 1] to guard against float precision
+            # (Chroma can return slightly negative distance, causing
+            #  1 - (dist/2) to exceed 1.0 by ~1e-8, failing Pydantic le=1.0)
+            similarity = max(0.0, min(1.0, 1.0 - (dist / 2.0)))
             if similarity < min_similarity:
                 continue
 
