@@ -69,6 +69,40 @@ CDP (Chrome DevTools Protocol) attach ke Edge/Chrome yang sudah login.
 
 ---
 
+### 2026-11-03 — Sesi 6a (SQLite Store)
+
+**Selesai:**
+- `formpilot/memory/sqlite_store.py`: `SqliteStore` class with 3 tables
+  - Profile: get, set (upsert), get_all, delete, find_relevant (keyword)
+  - Sessions: log_start, log_finish, get, list_recent
+  - Pending questions: save, answer, list (filter by session / unanswered)
+- `tests/test_sqlite_store.py`: 23 unit tests
+- `docs/STATE.md`: this log
+
+**Verifikasi:**
+- `pytest tests/test_sqlite_store.py -v`: 23 passed
+- `pytest -v -m "not integration"`: 77 passed total (54 existing + 23 new)
+- `ruff check formpilot/ tests/ scripts/`: clean
+
+**Keputusan:**
+- `find_relevant` uses simple keyword match (words len >= 3). Not semantic.
+  ChromaDB (Sesi 6b) will handle narrative memory with real embeddings.
+- Upsert via `ON CONFLICT(key) DO UPDATE` — no separate update logic.
+- `_connect()` is a context manager — auto commit/rollback/close.
+- Schema is idempotent (`CREATE IF NOT EXISTS`).
+
+**Known Limitations:**
+- `find_relevant` keyword match misses synonyms (e.g. "nama" vs "name")
+- No pagination for `list_recent_sessions` (assumes small DB)
+
+**Berikutnya (Sesi 6b — Vector Store / ChromaDB):**
+- `formpilot/memory/vector_store.py`: ChromaDB persistent client
+- Embedding via Ollama (`nomic-embed-text`)
+- `add_answer`, `search_similar`
+- Tests with mock embeddings
+
+---
+
 ## Dokumen Referensi
 
 - **Agent baru wajib baca:** `docs/AGENT-BRIEF.md`
