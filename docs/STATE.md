@@ -208,3 +208,25 @@ CDP (Chrome DevTools Protocol) attach ke Edge/Chrome yang sudah login.
 - Tag v0.1.0
 - GitHub release notes
 
+### 2026-11-04 — Sesi 8-fix (find_relevant bug)
+
+**Selesai:**
+- `sqlite_store.py`: find_relevant uses `re.findall(r"\w+", ...)` instead of `.split() + .isalnum()`. Fixes single-word questions with punctuation ("Nama?", "NIM?").
+- `tests/test_sqlite_store.py`: 2 regression tests added (28 total, was 26).
+- Manual test confirmed: RUN 1 prompts + saves, RUN 2 uses memory (no prompt).
+
+**Verifikasi:**
+- pytest -m "not integration": 124 passed
+- ruff: clean
+- Manual E2E: session 1 saved {'nama': 'budiman'}, session 2 auto-filled with source=sqlite
+
+**Keputusan:**
+- M4 dan M5 dinyatakan SELESAI. Interactive + memory loop terbukti end-to-end.
+- Known limitation: masih perlu diuji dengan form bertipe checkbox, dropdown, linear scale, multi-page.
+
+**Berikutnya (Sesi 9 — User Testing):**
+- Test dengan 3-5 form berbeda (bukan hanya text field)
+- Capture log output per form
+- Fix bug yang ditemukan
+- Setelah stabil: tag v0.1.0
+
