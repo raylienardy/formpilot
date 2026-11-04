@@ -266,10 +266,26 @@ def open_form_via_cdp(cdp_url: str, url: str, timeout_ms: int = DEFAULT_TIMEOUT_
 
 
 def extract_questions(page: Page, page_number: int = 1) -> ExtractedForm:
-    """Extract questions from current page."""
+    """Extract questions from current page.
+
+    Includes a page-ready wait: retries up to 5 times (500ms each) while
+    no visible listitem is present (transition still in progress).
+    """
     logger.debug("Extracting questions from page %d", page_number)
 
-    items = [item for item in page.locator('div[role="listitem"]').all() if item.is_visible()]
+    # Wait for DOM to stabilize after potential transition
+    for attempt in range(5):
+        items = page.locator('div[role="listitem"]').all()
+        visible_items = [it for it in items if it.is_visible()]
+        if visible_items:
+            # Has at least one visible item — break wait loop
+            break
+        page.wait_for_timeout(500)
+        logger.debug("extract_questions: page still empty, retry %d", attempt + 1)
+
+    # Skip invisible items (from other pages / hidden sections). Filtering
+    # before enumerate keeps q.index aligned with fill_answers.
+    items = [it for it in page.locator('div[role="listitem"]').all() if it.is_visible()]
     questions: list[Question] = []
 
     for idx, item in enumerate(items):
@@ -538,9 +554,32 @@ def close(page: Page | None = None) -> None:
 
 
 def _extract_question_text(item) -> str:
+    """Extract clean question text, removing 'Wajib' / '*' markers.
+
+    Returns "" for items that are NOT actual questions:
+    - Form title blocks (role="heading" aria-level="1" or class with "Title")
+    - Section header text (no heading at all)
+    """
+    # Skip if item contains form title marker (class or aria-level=1)
+    # Google Forms title uses aria-level="1", questions use aria-level="3"
+    title_marker = item.locator(
+        '[role="heading"][aria-level="1"], '
+        '[role="heading"][aria-level="2"], '
+        ".freebirdFormviewerComponentsQuestionBaseHeaderTitle, "
+        ".F9yp7e"  # Google Forms form title class
+    )
+    if title_marker.count() > 0:
+        return ""
+
     heading = item.locator('div[role="heading"]').first
     if heading.count() == 0:
         return ""
+
+    # Verify heading aria-level is 3 or 4 (question level, not title)
+    aria_level = heading.get_attribute("aria-level")
+    if aria_level and aria_level not in ("3", "4"):
+        return ""
+
     raw = heading.inner_text().strip()
     for marker in ["\n*", " *", "*\n", "Wajib", "Required"]:
         raw = raw.replace(marker, "")
@@ -549,18 +588,33 @@ def _extract_question_text(item) -> str:
 
 
 def _detect_field_type(item) -> tuple[FieldType, list[str]]:
+    """Inspect DOM inside item to detect field type + options.
+
+    For radio groups: retries up to 3 times (300ms each) because options
+    may render slightly after the container on page transitions.
+    """
     if item.locator("textarea").count() > 0:
         return FieldType.PARAGRAPH, []
 
-    if item.locator('input[type="text"]').count() > 0:
-        return FieldType.SHORT_TEXT, []
-
     radio_group = item.locator('div[role="radiogroup"]')
     if radio_group.count() > 0:
-        options = _extract_options_from_group(radio_group.first, role="radio")
+        # Retry radio option extraction — DOM may still be rendering
+        options: list[str] = []
+        for _attempt in range(3):
+            options = _extract_options_from_group(radio_group.first, role="radio")
+            if options:
+                break
+            # Wait briefly before retry
+            try:
+                item.page.wait_for_timeout(300)
+            except Exception:  # noqa: BLE001
+                break
         if 5 <= len(options) <= 11 and all(_looks_like_scale(o) for o in options):
             return FieldType.LINEAR_SCALE, options
         return FieldType.RADIO, options
+
+    if item.locator('input[type="text"]').count() > 0:
+        return FieldType.SHORT_TEXT, []
 
     # Checkbox — try direct first (modern Google Forms has no group wrapper)
     if item.locator('div[role="checkbox"]').count() > 0:

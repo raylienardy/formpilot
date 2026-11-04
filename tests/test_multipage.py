@@ -280,3 +280,62 @@ def test_click_next_returns_false_when_page_unchanged(page):
     result = click_next(page)
     # Should detect that page didn't change
     assert result is False
+
+
+def test_extract_excludes_form_title(page):
+    """Regression: form title (aria-level=1/2) must not be extracted as question."""
+    from formpilot.scraper import extract_questions
+
+    html = """
+    <!DOCTYPE html><html><body>
+      <div role="main">
+        <div role="listitem">
+          <div role="heading" aria-level="1">Form Title Header</div>
+        </div>
+        <div role="listitem">
+          <div role="heading" aria-level="3">Real Question?</div>
+          <input type="text" />
+        </div>
+      </div>
+    </body></html>
+    """
+    page.set_content(html, wait_until="domcontentloaded")
+    result = extract_questions(page)
+    assert len(result.questions) == 1
+    assert result.questions[0].text == "Real Question?"
+
+
+def test_detect_radio_with_late_render(page):
+    """Regression: radio detection must retry if options render late."""
+    from formpilot.scraper import extract_questions
+
+    html = """
+    <!DOCTYPE html><html><body>
+      <div role="main">
+        <div role="listitem">
+          <div role="heading" aria-level="3">Jurusan?</div>
+          <div role="radiogroup" id="radio-group"></div>
+        </div>
+      </div>
+      <script>
+        // Simulate late render
+        setTimeout(() => {
+          const g = document.getElementById('radio-group');
+          ['PTIK', 'TEKOM', 'PSIKOLOG'].forEach(o => {
+            const d = document.createElement('div');
+            d.setAttribute('role', 'radio');
+            d.setAttribute('aria-label', o);
+            d.innerText = o;
+            g.appendChild(d);
+          });
+        }, 200);
+      </script>
+    </body></html>
+    """
+    page.set_content(html, wait_until="domcontentloaded")
+    # Give time for the JS to render options
+    page.wait_for_timeout(500)
+    result = extract_questions(page)
+    assert len(result.questions) == 1
+    assert result.questions[0].field_type.value == "radio"
+    assert len(result.questions[0].options) == 3
