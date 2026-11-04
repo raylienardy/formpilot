@@ -8,14 +8,12 @@ Halo, agent. Kamu baru membuka sesi di project **FormPilot**. Dokumen ini adalah
 
 ## 1. Apa itu FormPilot (30 detik)
 
-Asisten lokal berbasis AI untuk mengisi Google Forms secara otonom.
-- User terima link kuisioner → verifikasi manual → jalankan CLI → AI mengisi form
+Asisten lokal yang mengisi Google Forms dengan AI (v0.1.0 released 2026-11-04).
+- User terima link kuisioner → verifikasi manual → jalankan CLI → AI isi form
 - AI mulai dari memori KOSONG, lalu belajar dari jawaban user via CLI
 - Kuisioner berikutnya: AI pakai memori, hanya tanya hal baru
 - 100% lokal (Ollama), 100% open source (MIT)
-
-**Bukan** tools submit massal. **Bukan** tools cloud API.
-**Adalah** asisten human-in-the-loop yang tumbuh bersama user.
+- Status: v0.1.0 (single-page stable, multi-page best-effort)
 
 ---
 
@@ -23,10 +21,11 @@ Asisten lokal berbasis AI untuk mengisi Google Forms secara otonom.
 
 Baca dalam urutan ini, JANGAN dilompati:
 
-1. `docs/STATE.md` — apa yang selesai, apa berikutnya, ada blocker?
-2. `tasks/current/prd.md` — scope iterasi/fase yang sedang aktif
-3. `docs/INDEX.md` — navigasi dokumen lain jika perlu detail
-4. `docs/architecture.md` — peta modul (jika akan ubah kode)
+1. `CHANGELOG.md` — versi terbaru (v0.1.0) dan fitur yang sudah rilis
+2. `docs/STATE.md` — apa yang selesai, apa berikutnya, ada blocker?
+3. `tasks/current/prd.md` — scope iterasi/fase yang sedang aktif
+4. `docs/INDEX.md` — navigasi dokumen lain jika perlu detail
+5. `docs/architecture.md` — peta modul (jika akan ubah kode)
 
 Setelah baca, konfirmasi ke user: "Saya sudah baca STATE.md dan PRD. Saat ini kita di fase X, berikutnya Y. Siap lanjut?"
 

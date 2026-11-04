@@ -7,9 +7,9 @@ Dijalankan dari root project dengan virtualenv aktif.
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -e ".[dev]"
 playwright install chromium
-ollama pull qwen2.5:7b-instruct
+ollama pull qwen2.5:7b
 ollama pull nomic-embed-text
 cp config/example.yaml config/production.yaml
 cp config/example.env .env
@@ -30,6 +30,33 @@ python -m formpilot.cli --url "..." --headed
 # Config custom
 python -m formpilot.cli --url "..." --config ./config/production.yaml
 ```
+
+### CLI flags reference (v0.1.0)
+
+| Flag | Purpose | Notes |
+| :--- | :--- | :--- |
+| `--url` | Google Forms URL | Required |
+| `--ai` | Enable LLM resolution | Ollama must run; model from config |
+| `--use-memory` | Enable SQLite + ChromaDB | Required for memory & session log |
+| `--interactive` | Prompt user for needs_cli | Requires `--ai`; conflicts with `--dummy-fill` |
+| `--dummy-fill` | Fill with placeholders | Testing only; requires `--ai` |
+| `--cdp-url` | Attach via CDP | For login-required forms; Edge with `--remote-debugging-port=9222` |
+| `--headed` | Visible browser | Default headless |
+| `--config` | Config path | Default `./config/production.yaml` |
+
+### Interactive mode details
+
+When `--interactive` runs and brain returns `needs_cli=True`, FormPilot:
+1. Shows Rich panel with question (type, options if any)
+2. Prompts for input (validates against options for radio/checkbox/scale)
+3. Saves answer to memory (facts → SQLite, narratives → ChromaDB)
+4. Applies answer to form field
+5. Continues to next needs_cli question or next page
+
+### Response receipts handling
+
+If form has "Send me a copy of my responses" / "Simpan email saya" toggle,
+FormPilot auto-checks it on page 1 (works in CDP mode with logged-in user).
 
 ## Development
 

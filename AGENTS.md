@@ -10,7 +10,7 @@ Konteks wajib untuk setiap AI coding agent (DeepSeek, OpenCode, Claude Code, Cur
 **Tujuan:** Asisten lokal pengisi Google Forms otonom, memori persisten.
 **Stack:** Python 3.11+, Playwright, Ollama, ChromaDB, SQLite, Rich.
 **Lisensi:** MIT (open source penuh).
-**Status:** Fase scaffolding — belum ada kode fungsional.
+**Status:** v0.1.0 released (2026-11-04). See CHANGELOG.md for features. See docs/ROADMAP.md for next milestones (v0.1.1 in planning).
 
 **Prinsip inti:**
 1. **100% lokal.** Tidak ada API cloud (OpenAI, Anthropic, Gemini, Firebase, Supabase cloud).
