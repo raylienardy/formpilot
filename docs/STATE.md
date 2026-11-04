@@ -230,3 +230,29 @@ CDP (Chrome DevTools Protocol) attach ke Edge/Chrome yang sudah login.
 - Fix bug yang ditemukan
 - Setelah stabil: tag v0.1.0
 
+### 2026-11-04 — Sesi 10 (v0.1.0 Release)
+
+**Selesai:**
+- CHANGELOG.md: v0.1.0 entry with full feature list + known limitations
+- docs/ROADMAP.md: M6 marked SELESAI
+- docs/STATE.md: this log
+- Git tag: v0.1.0
+
+**Keputusan:**
+- v0.1.0 released with multi-page as "best-effort" (known limitation documented)
+- Single-page forms fully stable (Form 1, 2, 3 verified)
+- Multi-page response receipts: fix applied, testing pending on real forms
+
+**Known Limitations for v0.1.0:**
+- Multi-page may fail on some response-receipt configurations
+- Requires manual Edge debug launch for login-required forms
+- Dropdown filling: v0.1.1
+- No auto-submit
+
+**Berikutnya (v0.1.1):**
+- Real-world multi-page testing (3-5 campus forms)
+- Dropdown filling
+- Response receipt refinements if needed
+
+**Blockers:** None. v0.1.0 released.
+

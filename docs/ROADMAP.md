@@ -14,7 +14,7 @@ FormPilot adalah asisten lokal yang membantu pengguna mengisi kuisioner Google F
 | **M3 — LLM Integration** | 2 sesi | Ollama jalan, brain.py bisa jawab pertanyaan faktual sederhana |
 | **M4 — Memory System** | ✅ Selesai | SQLite + ChromaDB, CLI tanya user, memori tumbuh |
 | **M5 — End-to-End** | ✅ Selesai | CLI lengkap, form bisa diisi dari A-Z |
-| **M6 — v0.1 Release** | 1 sesi | README, demo video, tag v0.1.0 di GitHub |
+| **M6 — v0.1 Release** | ✅ Selesai | v0.1.0 tagged 2026-11-04 |
 | **M7 — Web UI (opsional)** | 3-4 sesi | Halaman review lokal (localhost), tidak wajib |
 
 ## Fase teknis detail
@@ -122,7 +122,7 @@ FormPilot adalah asisten lokal yang membantu pengguna mengisi kuisioner Google F
 **Dependency:** Fase 4 selesai
 **Status: SELESAI (2026-11-04)** — commit bf470b2 (bug fix included)
 
-### FASE 6 — v0.1 Release
+### FASE 6 — v0.1 Release ✅ SELESAI
 **Tujuan:** Rilis publik pertama di GitHub.
 **Deliverable:**
 - README lengkap dengan demo GIF
@@ -137,6 +137,7 @@ FormPilot adalah asisten lokal yang membantu pengguna mengisi kuisioner Google F
 
 **Estimasi:** 2-3 jam
 **Dependency:** Fase 5 selesai
+**Status: SELESAI (2026-11-04)** — v0.1.0 tagged, commit 9074914
 
 ### FASE 7 — Web UI lokal (OPSIONAL)
 **Tujuan:** Pengganti CLI dengan browser. Hanya jika CLI terbukti kurang.
