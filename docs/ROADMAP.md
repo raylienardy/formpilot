@@ -15,6 +15,8 @@ FormPilot adalah asisten lokal yang membantu pengguna mengisi kuisioner Google F
 | **M4 — Memory System** | ✅ Selesai | SQLite + ChromaDB, CLI tanya user, memori tumbuh |
 | **M5 — End-to-End** | ✅ Selesai | CLI lengkap, form bisa diisi dari A-Z |
 | **M6 — v0.1 Release** | ✅ Selesai | v0.1.0 tagged 2026-11-04 |
+| **M8 — v0.2.0 Auto-Fill** | 7 sesi | Browser picker, auto-fill, preview, two-way sync MVP |
+| **M9 — v0.2.1 Polish** | 2 sesi | i18n (id/en), memory export/import |
 | **M7 — Web UI (opsional)** | 3-4 sesi | Halaman review lokal (localhost), tidak wajib |
 
 ## Fase teknis detail
@@ -138,6 +140,32 @@ FormPilot adalah asisten lokal yang membantu pengguna mengisi kuisioner Google F
 **Estimasi:** 2-3 jam
 **Dependency:** Fase 5 selesai
 **Status: SELESAI (2026-11-04)** — v0.1.0 tagged, commit 9074914
+
+### FASE 9 — v0.2.0 Auto-Fill Release
+
+**Tujuan:** Ubah FormPilot dari interactive ke auto-fill mode.
+**Vision:** `docs/VISION-V020.md`
+**PRD:** `tasks/current/prd_v020.md`
+
+**7 Sesi:**
+1. Browser picker + profile strategy (ADR-007)
+2. Multi-account + auto-launch
+3. Auto-fill mode + threshold (ADR-008)
+4. Field safety smart ask (ADR-009)
+5. Preview + submit detection
+6. Two-way sync + `auto` shortcut (ADR-011, ADR-012)
+7. Multi-user + release
+
+**Status:** Belum dimulai. Target: post-v0.1.0.
+
+### FASE 10 — v0.2.1 Polish Release
+
+**Tujuan:** i18n + memory export/import.
+**2 Sesi:**
+1. Bahasa interface (id/en)
+2. Memory export/import
+
+**Status:** Backlog. Target: after FASE 9.
 
 ### FASE 7 — Web UI lokal (OPSIONAL)
 **Tujuan:** Pengganti CLI dengan browser. Hanya jika CLI terbukti kurang.
