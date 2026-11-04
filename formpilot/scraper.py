@@ -374,6 +374,77 @@ def fill_answers(page: Page, questions: list[Question], answers: list[Answer]) -
     return filled
 
 
+def handle_response_receipts(page: Page) -> bool:
+    """Auto-accept Google Forms response receipts toggle.
+
+    Some Google Forms require user to accept "Send me a copy of my
+    responses" or "Save my email" before Next button is enabled.
+    This function detects and checks that toggle automatically.
+
+    Works in CDP mode where user is already logged in (email populated).
+    In stealth mode (fresh browser), might fail if form requires login.
+
+    Returns:
+        True if response receipt toggle was found and handled OR was not
+        present (nothing to do).
+        False if toggle was found but could not be checked.
+    """
+    # Detect toggle by text (English + Indonesian variants)
+    receipt_patterns = [
+        "Send me a copy of my responses",
+        "Send me a copy",
+        "Save my email",
+        "Save my Google Account email",
+        "Simpan email saya",
+        "Kirim salinan tanggapan",
+        "Izinkan edit respons",
+        "Allow response editing",
+    ]
+
+    for pattern in receipt_patterns:
+        # Look for checkbox with matching aria-label or text
+        checkbox = page.locator(
+            f'div[role="checkbox"][aria-label*="{pattern}"], '
+            f'div[role="checkbox"]:has-text("{pattern}"), '
+            f'input[type="checkbox"][aria-label*="{pattern}"]'
+        ).first
+
+        if checkbox.count() > 0 and checkbox.is_visible():
+            # Check if already checked
+            aria_checked = checkbox.get_attribute("aria-checked")
+            is_checked = checkbox.get_attribute("checked") is not None
+            if aria_checked == "true" or is_checked:
+                logger.debug("Response receipt already checked (%s)", pattern)
+                return True
+
+            logger.info(
+                "Response receipt toggle detected (%s) — clicking to accept",
+                pattern,
+            )
+            try:
+                checkbox.click(timeout=5000)
+                page.wait_for_timeout(300)
+
+                # Verify checked
+                aria_checked_after = checkbox.get_attribute("aria-checked")
+                if aria_checked_after == "true":
+                    logger.info("Response receipt accepted")
+                    return True
+                logger.warning(
+                    "Response receipt clicked but state unknown "
+                    "(aria-checked=%r). Continuing anyway.",
+                    aria_checked_after,
+                )
+                return True  # assume ok, let Next click verify
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Failed to click response receipt: %s", e)
+                return False
+
+    # Not found — some forms don't have it
+    logger.debug("No response receipt toggle found (OK)")
+    return True
+
+
 def click_next(page: Page) -> bool:
     """Click Next button and verify page actually navigated.
 

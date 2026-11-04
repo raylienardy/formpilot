@@ -24,6 +24,7 @@ from formpilot.scraper import (
     close,
     extract_questions,
     fill_answers,
+    handle_response_receipts,
     has_validation_error,
     open_form,
     open_form_via_cdp,
@@ -135,6 +136,10 @@ def main() -> int:
         while page_number <= MAX_PAGES:
             extracted = extract_questions(page, page_number=page_number)
             page_dict = extracted.model_dump(mode="json")
+
+            # Handle response receipts toggle (only on page 1, once per run)
+            if page_number == 1:
+                handle_response_receipts(page)
 
             if args.ai and config is not None:
                 answers = resolve_questions(

@@ -339,3 +339,89 @@ def test_detect_radio_with_late_render(page):
     assert len(result.questions) == 1
     assert result.questions[0].field_type.value == "radio"
     assert len(result.questions[0].options) == 3
+
+
+def test_handle_response_receipts_checks_toggle(page):
+    """Regression: response receipt toggle should be auto-clicked."""
+    from formpilot.scraper import handle_response_receipts
+
+    html = """
+    <!DOCTYPE html><html><body>
+      <div role="main">
+        <div role="listitem">
+          <div role="heading" aria-level="3">Nama?</div>
+          <input type="text" />
+        </div>
+        <div
+          role="checkbox"
+          id="receipt"
+          aria-label="Send me a copy of my responses"
+          aria-checked="false"
+          style="cursor: pointer"
+        >
+          Send me a copy of my responses
+        </div>
+        <div role="button" id="next">Berikutnya</div>
+      </div>
+      <script>
+        document.getElementById('receipt').addEventListener('click', function() {
+          this.setAttribute('aria-checked', 'true');
+        });
+      </script>
+    </body></html>
+    """
+    page.set_content(html, wait_until="domcontentloaded")
+    result = handle_response_receipts(page)
+    assert result is True
+    assert page.locator("#receipt").get_attribute("aria-checked") == "true"
+
+
+def test_handle_response_receipts_no_toggle_is_ok(page):
+    """Regression: no response receipt toggle should still return True."""
+    from formpilot.scraper import handle_response_receipts
+
+    html = """
+    <!DOCTYPE html><html><body>
+      <div role="main">
+        <div role="listitem">
+          <div role="heading" aria-level="3">Nama?</div>
+          <input type="text" />
+        </div>
+        <div role="button" id="next">Berikutnya</div>
+      </div>
+    </body></html>
+    """
+    page.set_content(html, wait_until="domcontentloaded")
+    result = handle_response_receipts(page)
+    assert result is True
+
+
+def test_handle_response_receipts_indonesian_pattern(page):
+    """Regression: handle Indonesian 'Simpan email saya' pattern."""
+    from formpilot.scraper import handle_response_receipts
+
+    html = """
+    <!DOCTYPE html><html><body>
+      <div role="main">
+        <div
+          role="checkbox"
+          id="receipt"
+          aria-label="Simpan email saya"
+          aria-checked="false"
+          style="cursor: pointer"
+        >
+          Simpan email saya
+        </div>
+        <div role="button">Berikutnya</div>
+      </div>
+      <script>
+        document.getElementById('receipt').addEventListener('click', function() {
+          this.setAttribute('aria-checked', 'true');
+        });
+      </script>
+    </body></html>
+    """
+    page.set_content(html, wait_until="domcontentloaded")
+    result = handle_response_receipts(page)
+    assert result is True
+    assert page.locator("#receipt").get_attribute("aria-checked") == "true"
