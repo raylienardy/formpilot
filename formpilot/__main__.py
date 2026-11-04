@@ -14,11 +14,18 @@ import argparse
 import json
 import sys
 
+from rich.console import Console
+
 from formpilot.brain import BrainError, check_ollama_ready, resolve_questions
+from formpilot.browser_manager import (
+    BrowserError,
+    resolve_browser_from_arg,
+)
 from formpilot.cli import prompt_for_answers
 from formpilot.memory.schema import Answer, FieldType, Question
 from formpilot.memory.sqlite_store import SqliteStore
 from formpilot.memory.vector_store import VectorStore
+from formpilot.profile_manager import ProfileError, resolve_profile
 from formpilot.scraper import (
     click_next,
     close,
@@ -71,6 +78,25 @@ def main() -> int:
             "Attach to existing Chrome/Edge via CDP "
             "(e.g., http://localhost:9222). Use when form requires Google login. "
             "Launch browser first with: chrome.exe --remote-debugging-port=9222"
+        ),
+    )
+    parser.add_argument(
+        "--browser",
+        default=None,
+        help=(
+            "Browser to use: edge | chrome | brave | chromium | vivaldi "
+            "OR absolute path to executable. Default: auto-detect + menu."
+        ),
+    )
+    parser.add_argument(
+        "--profile",
+        choices=["existing", "isolated", "ask"],
+        default=None,
+        help=(
+            "Profile strategy for CDP mode. "
+            "'existing' = use default profile (instant login). "
+            "'isolated' = use dedicated FormPilot profile. "
+            "'ask' = prompt if browser running. Default: from config."
         ),
     )
     args = parser.parse_args()
@@ -126,6 +152,40 @@ def main() -> int:
         if args.cdp_url:
             logger.info("Using CDP mode: attaching to existing browser")
             page = open_form_via_cdp(args.cdp_url, args.url)
+        elif args.browser or (config and config.browser.preferred) or args.profile:
+            # Browser manager path: user wants control over browser/profile
+            _console = Console()
+            try:
+                browser = resolve_browser_from_arg(
+                    args.browser or (config.browser.preferred if config else None),
+                    console=_console,
+                )
+                strategy = args.profile or (
+                    config.browser.profile_strategy if config else "ask"
+                )
+                decision = resolve_profile(
+                    browser,
+                    strategy=strategy,
+                    console=_console,
+                )
+                if decision.needs_relaunch:
+                    _console.print(
+                        "[yellow]Note: existing profile with browser running. "
+                        "You must manually close the browser before FormPilot "
+                        "can attach, or use --profile isolated.[/yellow]"
+                    )
+                # Set cdp_url to localhost:9222 (launch_browser already launched)
+                # For now, print path — full integration with scraper in v0.2-2
+                _console.print(
+                    f"[green]Browser ready:[/green] {browser.display_name}\n"
+                    f"[green]Profile:[/green] {decision.path}\n"
+                    f"[dim]CDP integration in v0.2-2[/dim]"
+                )
+                # Fallback to standard open_form for now
+                page = open_form(args.url, headless=not args.headed)
+            except (BrowserError, ProfileError) as e:
+                print(f"Browser setup failed: {e}", file=sys.stderr)
+                return 2
         else:
             page = open_form(args.url, headless=not args.headed)
 
@@ -253,7 +313,6 @@ def main() -> int:
                     )
                 )
                 return 4
-
             page_number += 1
 
         print(
@@ -271,7 +330,6 @@ def main() -> int:
                 notes=f"{len(all_pages)} pages extracted",
             )
         return 0
-
     except Exception as e:  # noqa: BLE001
         if sqlite_store is not None and session_id is not None:
             sqlite_store.log_session_finish(session_id, "failed", notes=str(e)[:500])

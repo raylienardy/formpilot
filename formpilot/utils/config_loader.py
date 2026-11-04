@@ -29,6 +29,17 @@ class BrowserConfig(BaseModel):
     headless: bool = Field(..., description="Run browser headless")
     user_data_dir: str = Field(..., description="Persistent browser state directory")
     timeout_ms: int = Field(..., gt=0, description="Page load timeout in milliseconds")
+    preferred: str | None = Field(
+        default=None,
+        description=(
+            "Preferred browser name (edge, chrome, brave, chromium, vivaldi). "
+            "None = auto-detect + menu."
+        ),
+    )
+    profile_strategy: str = Field(
+        default="ask",
+        description="Profile strategy: 'existing' | 'isolated' | 'ask'",
+    )
 
 
 class MemoryConfig(BaseModel):
