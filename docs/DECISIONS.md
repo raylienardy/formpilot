@@ -151,7 +151,7 @@ similarity rendah. Perlu safety net.
 3. Configurable = user power user bisa adjust
 
 **Konsekuensi:**
-- Memory entry butuh field `last_verified` (sudah ada di schema)
+- Memory entry butuh field `last_verified` (ditambahkan di Sesi v0.2-3, see ADR-013)
 - Prompt muncul kalau similarity < 0.7
 - Warning di preview kalau stale
 
@@ -185,6 +185,7 @@ Flag `--force` untuk overwrite.
 - `_fill_single` harus cek `input.value` dulu
 - Conflict resolution UI dibutuhkan
 - `--force` untuk power user
+- Staleness check pakai `last_verified` (ditambahkan di Sesi v0.2-3, see ADR-013)
 
 ## ADR-010: Chromium v0.2, Firefox v0.3
 
@@ -273,3 +274,57 @@ v0.2 MVP: submit detection only.
 - v0.2 requires polling loop (poll setiap 2 detik)
 - Tab-close = diff done next run (bisa prompt user)
 - Real-time watcher = v0.3
+
+## ADR-013: Extend Memory Schema with `last_verified` Field (v0.2-3)
+
+**Tanggal:** 2026-11-04
+**Status:** Diterima (implementasi ditunda ke Sesi v0.2-3)
+
+**Konteks:**
+PLAN audit v0.2-0 menemukan bahwa VISION-V020.md, ADR-008, dan ADR-009
+mereferensikan field `last_verified` untuk staleness tracking, tapi
+field ini tidak ada di `formpilot/memory/schema.py` (v0.1.0 baseline).
+
+Field yang ada:
+- SQLite `profile` table: `key, value, category, updated_at`
+- Chroma metadata: `question, category, timestamp`
+- Pydantic `MemoryHit`: `question, answer, similarity, source, timestamp`
+
+**Keputusan:**
+Tambahkan field `last_verified` untuk staleness tracking. Implementasi
+di Sesi v0.2-3 (auto-fill mode), bukan sekarang.
+
+**Perubahan schema yang akan dilakukan di v0.2-3:**
+
+1. **SQLite `profile` table:**
+   - `ALTER TABLE profile ADD COLUMN last_verified TIMESTAMP`
+   - Migration logic: cek `PRAGMA table_info(profile)`, add jika tidak ada
+   - `set_profile_field`: set `last_verified = CURRENT_TIMESTAMP` (assumsi:
+     setting nilai = user baru verify)
+   - New method: `mark_profile_verified(key)` — update `last_verified` saja
+   - New method: `get_stale_profile_keys(threshold_days)` — return keys
+     dengan `last_verified` older than threshold
+
+2. **ChromaDB metadata:**
+   - `add_answer`: tambah `last_verified` = same as `timestamp` (new entry)
+   - New method: `mark_verified(doc_id)` — update `last_verified` metadata
+   - Search result: populate `MemoryHit.last_verified`
+
+3. **Pydantic `MemoryHit`:**
+   - Tambah `last_verified: datetime | None = None`
+
+**Alasan:**
+1. `updated_at` tidak cukup untuk staleness — itu track "kapan value terakhir
+   diubah", bukan "kapan user terakhir verify"
+2. Kalau user submit form dengan nilai yang sama 5 kali tanpa ubah, `updated_at`
+   tetap di tanggal awal → staleness false positive
+3. `last_verified` di-update saat submit form (two-way sync ADR-012) — akurat
+4. Small change, migration trivial di SQLite
+
+**Konsekuensi:**
+- v0.2-0 docs reference "last_verified (to be added in v0.2-3)"
+- v0.2-3 expands scope: schema + migration + staleness logic + tests
+- v0.2-3 estimasi: 3-4 jam (dari 2-3 jam)
+- v0.1.0 memory.db compatible via auto-migration saat init
+
+**Jangan implementasi sebelum Sesi v0.2-3 dimulai.**

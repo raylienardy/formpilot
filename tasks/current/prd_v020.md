@@ -33,19 +33,33 @@
 - Prompt only if 2+
 - Tests for single/multi account
 
-## Sesi v0.2-3: Auto-Fill Mode + Threshold
+## Sesi v0.2-3: Auto-Fill Mode + Threshold + Schema Update
 
 **Deliverable:**
-- Flag `--auto-fill`, `--review` (hybrid)
-- Confidence threshold 0.7
-- Staleness tracking (`last_verified` in memory)
-- Config: `memory.auto_fill_threshold`, `memory.staleness_days`
+- **Schema update (ADR-013):**
+  - SQLite: `ALTER TABLE profile ADD COLUMN last_verified TIMESTAMP`
+  - Migration logic in `sqlite_store._init_schema` (idempotent, PRAGMA check)
+  - `set_profile_field`: set `last_verified = CURRENT_TIMESTAMP`
+  - New methods: `mark_profile_verified(key)`, `get_stale_profile_keys(threshold_days)`
+  - Chroma: `add_answer` includes `last_verified` in metadata
+  - New method: `mark_verified(doc_id)` for Chroma
+  - Pydantic `MemoryHit`: add `last_verified: datetime | None = None`
+- **Auto-fill logic:**
+  - Flag `--auto-fill`, `--review` (hybrid)
+  - Confidence threshold 0.7 (skip if below)
+  - Staleness check (warning if `last_verified` > 180 days)
+- **Config:** `memory.auto_fill_threshold`, `memory.staleness_days`
 
 **Acceptance:**
-- 0 prompts if memory matured (all similarity >= 0.7)
+- Migration: old memory.db (no last_verified) → new schema adds column
+- 0 prompts if memory matured (all similarity >= 0.7, none stale)
 - Prompt if similarity < 0.7
 - Warning if stale > 180 days
-- Tests for threshold logic
+- `mark_profile_verified` and `mark_verified` update only timestamp
+- `get_stale_profile_keys` returns correct keys
+- 15+ tests (schema, migration, threshold, staleness)
+
+**Expanded scope:** ~3-4 jam (was 2-3 jam), includes ADR-013 implementation.
 
 ## Sesi v0.2-4: Field Safety
 

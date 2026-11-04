@@ -112,13 +112,14 @@ Target v0.2.0: **"One command, auto-fill, preview, submit, memory grows."**
 - Flag: `--review` (hybrid)
 - Confidence threshold: `memory.auto_fill_threshold: 0.7`
 - Staleness: `memory.staleness_days: 180`
+- Staleness uses `last_verified` field (added in Sesi v0.2-3, see ADR-013)
 
 ### 5.5 Field Safety — Smart Ask (ADR-009)
 Auto-fill dulu. Prompt HANYA kalau:
 - Field kosong, memory punya, similarity < 0.7
 - Field kosong, memory tidak punya, **required**
 - Field sudah ada isi, beda dengan memory
-- Memory `last_verified` > 180 hari
+- Memory `last_verified` > 180 hari (field added in Sesi v0.2-3, see ADR-013)
 - Default: skip fill untuk field yang sudah ada isi manual
 - Flag: `--force` (overwrite)
 
@@ -183,7 +184,8 @@ Auto-fill dulu. Prompt HANYA kalau:
 - **ADR-009:** Smart ask field safety (skip default, prompt on conflict)
 - **ADR-010:** Chromium v0.2, Firefox v0.3
 - **ADR-011:** `formpilot auto` command shortcut
-- **ADR-012:** Two-way sync MVP = submit detection only
+- **ADR-012:** Two-Way sync MVP = submit detection only
+- **ADR-013:** Extend memory schema with `last_verified` (in Sesi v0.2-3)
 
 ---
 
