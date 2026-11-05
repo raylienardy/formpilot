@@ -38,7 +38,7 @@ class ProfileDecision:
     """Result of profile resolution."""
 
     path: Path
-    strategy: str      # "existing" or "isolated"
+    strategy: str  # "existing" or "isolated"
     needs_relaunch: bool  # True if existing profile but browser was running
 
 
@@ -85,9 +85,7 @@ def get_existing_profile_path(browser: BrowserInfo) -> Path:
         }
 
     if browser.name not in mapping:
-        raise ProfileError(
-            f"Unknown browser for existing profile: {browser.name}"
-        )
+        raise ProfileError(f"Unknown browser for existing profile: {browser.name}")
     return mapping[browser.name]
 
 
@@ -135,42 +133,48 @@ def resolve_profile(
     # Isolated: simple, no prompt
     if strategy == "isolated":
         path = get_isolated_profile_path(browser)
-        console.print(
-            f"[cyan]Using isolated profile:[/cyan] [dim]{path}[/dim]"
-        )
+        console.print(f"[cyan]Using isolated profile:[/cyan] [dim]{path}[/dim]")
         return ProfileDecision(path=path, strategy="isolated", needs_relaunch=False)
 
-    # For existing or ask, check if browser is running
+    # For existing or ask, use snapshot (Edge 136+ blocks CDP on default
+    # profile, so we snapshot to a different user-data-dir, per ADR-014).
     browser_running = is_browser_running(browser)
 
-    if not browser_running:
-        # Browser not running → use existing (instant login)
-        path = get_existing_profile_path(browser)
-        console.print(
-            f"[green]Using existing profile (browser not running):[/green] "
-            f"[dim]{path}[/dim]"
-        )
-        return ProfileDecision(path=path, strategy="existing", needs_relaunch=False)
+    if strategy == "existing" or (strategy == "ask" and not browser_running):
+        # Determine if relaunch needed
+        needs_relaunch = False
+        if strategy == "existing" and browser_running:
+            needs_relaunch = True
+            console.print(
+                f"[yellow]{browser.display_name} running. "
+                f"Will close and relaunch from snapshot.[/yellow]"
+            )
 
-    # Browser IS running
-    if strategy == "existing":
-        # Force existing: needs relaunch, no prompt
-        path = get_existing_profile_path(browser)
-        console.print(
-            f"[yellow]Using existing profile (will require relaunch):[/yellow] "
-            f"[dim]{path}[/dim]"
+        # Snapshot the existing profile
+        try:
+            snap_path = snapshot_existing_profile(
+                browser,
+                console=console,
+                force_refresh=False,
+            )
+        except ProfileError as e:
+            raise ProfileError(
+                f"Snapshot failed: {e}. Try: --profile isolated (login once, then use that)."
+            ) from e
+
+        return ProfileDecision(
+            path=snap_path,
+            strategy="existing",
+            needs_relaunch=needs_relaunch,
         )
-        return ProfileDecision(path=path, strategy="existing", needs_relaunch=True)
 
     # strategy == "ask" AND browser running → prompt
     console.print()
-    console.print(
-        f"[bold yellow]{browser.display_name} sedang berjalan.[/bold yellow]"
-    )
+    console.print(f"[bold yellow]{browser.display_name} sedang berjalan.[/bold yellow]")
     console.print("[bold]Pilih profile strategy:[/bold]")
     console.print(
-        "  [yellow]1.[/yellow] Relaunch dengan existing profile "
-        "[dim](instant login, tapi semua tab hilang)[/dim]"
+        "  [yellow]1.[/yellow] Snapshot profile existing "
+        "[dim](instant login, tab lama ditutup)[/dim]"
     )
     console.print(
         "  [yellow]2.[/yellow] Pakai isolated profile "
@@ -179,14 +183,22 @@ def resolve_profile(
     console.print("  [yellow]3.[/yellow] Cancel")
 
     while True:
-        raw = Prompt.ask("[bold]Pilih (1-3)[/bold]", default="2", console=console)
+        raw = Prompt.ask("[bold]Pilih (1-3)[/bold]", default="1", console=console)
         if raw == "1":
-            path = get_existing_profile_path(browser)
-            console.print(
-                "[yellow]Existing profile dipilih. "
-                "Browser akan ditutup dan diluncurkan ulang.[/yellow]"
+            try:
+                snap_path = snapshot_existing_profile(
+                    browser,
+                    console=console,
+                    force_refresh=False,
+                )
+            except ProfileError as e:
+                console.print(f"[red]Snapshot failed: {e}[/red]")
+                continue
+            return ProfileDecision(
+                path=snap_path,
+                strategy="existing",
+                needs_relaunch=True,
             )
-            return ProfileDecision(path=path, strategy="existing", needs_relaunch=True)
         if raw == "2":
             path = get_isolated_profile_path(browser)
             console.print(f"[cyan]Isolated profile:[/cyan] [dim]{path}[/dim]")
@@ -244,10 +256,12 @@ def detect_google_accounts(browser: BrowserInfo) -> list[dict]:
         for acct in account_info:
             email = acct.get("email", "").strip()
             if email and "@" in email:
-                accounts.append({
-                    "email": email,
-                    "profile_dir": subdir.name,
-                })
+                accounts.append(
+                    {
+                        "email": email,
+                        "profile_dir": subdir.name,
+                    }
+                )
 
     logger.debug("Detected %d accounts in %s profile", len(accounts), browser.name)
     return accounts
@@ -280,22 +294,224 @@ def resolve_account_profile(
     if not matches:
         available = ", ".join(a["email"] for a in accounts) or "none"
         raise ProfileError(
-            f"Account '{email}' not found in {browser.display_name} profile. "
-            f"Available: {available}"
+            f"Account '{email}' not found in {browser.display_name} profile. Available: {available}"
         )
 
     if len(matches) > 1:
         # Multiple profiles have same email — use first (rare)
         logger.warning(
             "Multiple profiles found for %s: %s, using first",
-            email, [m["profile_dir"] for m in matches],
+            email,
+            [m["profile_dir"] for m in matches],
         )
 
     matched = matches[0]
     base = get_existing_profile_path(browser)
     profile_path = base / matched["profile_dir"]
-    console.print(
-        f"[green]Using account:[/green] {email} "
-        f"[dim]({matched['profile_dir']})[/dim]"
-    )
+    console.print(f"[green]Using account:[/green] {email} [dim]({matched['profile_dir']})[/dim]")
     return profile_path
+
+
+def get_snapshot_path(browser: BrowserInfo) -> Path:
+    """Get snapshot profile path for browser.
+
+    Snapshot = auto-copied version of existing user profile.
+    Used because Edge 136+ blocks --remote-debugging-port on default
+    profile. Snapshot preserves cookies (instant login) but is a
+    different user-data-dir so CDP works.
+
+    Args:
+        browser: BrowserInfo.
+
+    Returns:
+        Path ~/.formpilot/profiles/<browser>-snapshot/
+    """
+    return Path.home() / ".formpilot" / "profiles" / f"{browser.name}-snapshot"
+
+
+# Files/dirs to skip when snapshotting (locked, temp, cache)
+_SNAPSHOT_SKIP_PATTERNS = (
+    "BrowserMetrics",
+    "Crashpad",
+    "Safe Browsing",
+    "ShaderCache",
+    "GrShaderCache",
+    "GraphiteDawnCache",
+    "SingletonLock",
+    "SingletonSocket",
+    "SingletonCookie",
+    "lockfile",
+)
+
+
+def _should_skip_snapshot_item(name: str) -> bool:
+    """Check if a file/dir name should be skipped during snapshot copy."""
+    for pattern in _SNAPSHOT_SKIP_PATTERNS:
+        if pattern.lower() in name.lower():
+            return True
+    if name.endswith(".pma"):  # BrowserMetrics
+        return True
+    return name.endswith(".lock")
+
+
+def snapshot_existing_profile(
+    browser: BrowserInfo,
+    console: Console | None = None,
+    force_refresh: bool = False,
+) -> Path:
+    """Snapshot existing profile to .formpilot/profiles/<browser>-snapshot/.
+
+    If snapshot exists and force_refresh=False, returns existing path
+    without copying.
+
+    Copy may skip locked/cache files (BrowserMetrics, Crashpad, etc.).
+    This is expected — cookies and preferences are what matter.
+
+    Args:
+        browser: BrowserInfo.
+        console: Optional Rich console.
+        force_refresh: If True, delete existing snapshot and re-copy.
+
+    Returns:
+        Path to snapshot directory.
+
+    Raises:
+        ProfileError: If source profile missing or copy fails critically.
+    """
+    import shutil
+
+    if console is None:
+        console = Console()
+
+    src = get_existing_profile_path(browser)
+    if not src.exists():
+        raise ProfileError(
+            f"Existing profile not found: {src}. Login to {browser.display_name} first, then retry."
+        )
+
+    dst = get_snapshot_path(browser)
+
+    # Reuse existing snapshot unless refresh forced
+    if dst.exists() and not force_refresh:
+        console.print(f"[cyan]Using existing snapshot:[/cyan] [dim]{dst}[/dim]")
+        console.print(
+            "[dim]Tip: use --refresh-snapshot to re-copy from live profile "
+            "after you update Google login in Edge.[/dim]"
+        )
+        return dst
+
+    # Delete old snapshot if refreshing
+    if dst.exists():
+        console.print("[yellow]Deleting old snapshot...[/yellow]")
+        try:
+            shutil.rmtree(dst)
+        except OSError as e:
+            raise ProfileError(f"Failed to delete old snapshot: {e}") from e
+
+    dst.parent.mkdir(parents=True, exist_ok=True)
+
+    console.print(
+        f"[cyan]Copying profile snapshot...[/cyan]\n"
+        f"[dim]  from: {src}[/dim]\n"
+        f"[dim]  to:   {dst}[/dim]\n"
+        f"[dim]This may take 30-90 seconds (first time only).[/dim]"
+    )
+
+    skipped: list[str] = []
+
+    def _ignore_func(dir_path: str, names: list[str]) -> list[str]:
+        """Ignore function for copytree — skip locked/cache files."""
+        ignore_list: list[str] = []
+        for name in names:
+            if _should_skip_snapshot_item(name):
+                ignore_list.append(name)
+                skipped.append(name)
+        return ignore_list
+
+    try:
+        shutil.copytree(
+            src,
+            dst,
+            ignore=_ignore_func,
+            dirs_exist_ok=True,
+            ignore_dangling_symlinks=True,
+        )
+    except (OSError, shutil.Error) as e:
+        # Partial copy may still work (cookies copied, some cache failed)
+        # Log warning but proceed if dst has key files
+        console.print(f"[yellow]Copy had issues (may be OK): {e}[/yellow]")
+
+    # Verify critical file exists (Cookies)
+    cookies_candidates = [
+        dst / "Default" / "Cookies",
+        dst / "Default" / "Network" / "Cookies",
+    ]
+    if not any(c.exists() for c in cookies_candidates):
+        raise ProfileError(
+            f"Snapshot copy failed: no Cookies file found in {dst}. "
+            f"Close {browser.display_name} completely and retry."
+        )
+
+    console.print(
+        f"[green]Snapshot ready.[/green] "
+        f"[dim]Skipped {len(skipped)} cache/locked items (expected).[/dim]"
+    )
+    logger.info(
+        "Snapshot created: %s -> %s (skipped %d items)",
+        src,
+        dst,
+        len(skipped),
+    )
+    return dst
+
+
+def is_snapshot_stale(
+    browser: BrowserInfo,
+    threshold_days: int = 7,
+) -> bool:
+    """Check if snapshot is older than threshold compared to live profile.
+
+    Compares mtime of live Cookies vs snapshot Cookies.
+
+    Args:
+        browser: BrowserInfo.
+        threshold_days: Days threshold.
+
+    Returns:
+        True if live profile is newer than snapshot by >threshold_days.
+        False if snapshot up-to-date or any check fails (be lenient).
+    """
+
+    try:
+        live = get_existing_profile_path(browser)
+        snap = get_snapshot_path(browser)
+    except ProfileError:
+        return False
+
+    if not snap.exists():
+        return True  # No snapshot = definitely "stale" (need create)
+
+    # Find cookies in both
+    def _find_cookies(base: Path) -> Path | None:
+        for cand in [
+            base / "Default" / "Cookies",
+            base / "Default" / "Network" / "Cookies",
+        ]:
+            if cand.exists():
+                return cand
+        return None
+
+    live_cookies = _find_cookies(live)
+    snap_cookies = _find_cookies(snap)
+
+    if live_cookies is None or snap_cookies is None:
+        return False  # Can't compare — don't nag user
+
+    try:
+        live_mtime = live_cookies.stat().st_mtime
+        snap_mtime = snap_cookies.stat().st_mtime
+    except OSError:
+        return False
+
+    threshold_sec = threshold_days * 86400
+    return (live_mtime - snap_mtime) > threshold_sec

@@ -256,3 +256,13 @@ CDP (Chrome DevTools Protocol) attach ke Edge/Chrome yang sudah login.
 
 **Blockers:** None. v0.1.0 released.
 
+
+### 2026-11-05 — PAUSED (v0.2 CDP Approach Abandoned)
+
+**Status:** Paused.
+- Discovered fatal flaw: Edge/Chrome ABE (App-Bound Encryption) + Google Anti-Bot + 2FA makes Playwright/CDP profile reuse impossible.
+- v0.2-1, v0.2-2, v0.2-2.5 code committed for reference.
+- **Next Step (v0.3):** Pivot to Browser Extension (Manifest V3) + Local Python API (FastAPI).
+
+See `docs/PAUSED-PLAN-v0.2.md` for full context.
+

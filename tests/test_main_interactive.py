@@ -24,8 +24,11 @@ def test_interactive_requires_ai():
 def test_interactive_conflicts_with_dummy_fill():
     """--interactive and --dummy-fill cannot coexist."""
     result = _run_main(
-        "--url", "https://example.com",
-        "--ai", "--interactive", "--dummy-fill",
+        "--url",
+        "https://example.com",
+        "--ai",
+        "--interactive",
+        "--dummy-fill",
     )
     assert result.returncode == 1
     assert "mutually exclusive" in result.stderr

@@ -19,6 +19,7 @@ from rich.console import Console
 from formpilot.brain import BrainError, check_ollama_ready, resolve_questions
 from formpilot.browser_manager import (
     BrowserError,
+    is_browser_running,
     kill_browser,
     launch_browser,
     resolve_browser_from_arg,
@@ -32,6 +33,7 @@ from formpilot.profile_manager import (
     ProfileError,
     resolve_account_profile,
     resolve_profile,
+    snapshot_existing_profile,
 )
 from formpilot.scraper import (
     click_next,
@@ -116,6 +118,15 @@ def main() -> int:
             "Example: --account budi@gmail.com"
         ),
     )
+    parser.add_argument(
+        "--refresh-snapshot",
+        action="store_true",
+        help=(
+            "Delete existing profile snapshot and re-copy from live profile. "
+            "Use when you've updated Google login in Edge and want the "
+            "snapshot to reflect that. Only affects --profile existing/ask."
+        ),
+    )
     args = parser.parse_args()
 
     setup_logger("formpilot", level="INFO")
@@ -177,25 +188,38 @@ def main() -> int:
                     args.browser or (config.browser.preferred if config else None),
                     console=_console,
                 )
-                strategy = args.profile or (
-                    config.browser.profile_strategy if config else "ask"
-                )
+                strategy = args.profile or (config.browser.profile_strategy if config else "ask")
                 decision = resolve_profile(
                     browser,
                     strategy=strategy,
                     console=_console,
                 )
 
+                # Handle --refresh-snapshot: force re-snapshot after kill
+                if args.refresh_snapshot and decision.strategy == "existing":
+                    if is_browser_running(browser):
+                        _console.print(
+                            "[yellow]Refreshing snapshot: closing browser first...[/yellow]"
+                        )
+                        kill_browser(browser)
+                    _console.print("[yellow]Refreshing snapshot from live profile...[/yellow]")
+                    try:
+                        decision.path = snapshot_existing_profile(
+                            browser,
+                            console=_console,
+                            force_refresh=True,
+                        )
+                    except ProfileError as e:
+                        print(f"Snapshot refresh failed: {e}", file=sys.stderr)
+                        return 2
+
                 # Handle relaunch: kill existing browser, wait, relaunch
                 if decision.needs_relaunch:
                     _console.print(
-                        "[yellow]Relaunching browser (closing existing "
-                        "windows)...[/yellow]"
+                        "[yellow]Relaunching browser (closing existing windows)...[/yellow]"
                     )
                     if not kill_browser(browser):
-                        _console.print(
-                            "[red]Failed to close browser. Try manually.[/red]"
-                        )
+                        _console.print("[red]Failed to close browser. Try manually.[/red]")
                         return 2
 
                 # Resolve account if --account specified
@@ -210,16 +234,16 @@ def main() -> int:
                         return 2
                     try:
                         profile_path = resolve_account_profile(
-                            browser, args.account, console=_console,
+                            browser,
+                            args.account,
+                            console=_console,
                         )
                     except ProfileError as e:
                         print(f"Account resolution failed: {e}", file=sys.stderr)
                         return 2
 
                 # Launch browser with selected profile
-                _console.print(
-                    f"[cyan]Launching {browser.display_name}...[/cyan]"
-                )
+                _console.print(f"[cyan]Launching {browser.display_name}...[/cyan]")
                 launch_browser(
                     browser,
                     profile_path,
@@ -229,20 +253,13 @@ def main() -> int:
                 # Wait for CDP endpoint
                 _console.print("[cyan]Waiting for browser ready...[/cyan]")
                 if not wait_for_cdp_ready(port=9222, timeout_seconds=30):
-                    _console.print(
-                        "[red]Browser did not become ready (CDP timeout).[/red]"
-                    )
+                    _console.print("[red]Browser did not become ready (CDP timeout).[/red]")
                     return 2
 
-                _console.print(
-                    "[green]Attached via CDP:[/green] "
-                    "http://127.0.0.1:9222"
-                )
+                _console.print("[green]Attached via CDP:[/green] http://127.0.0.1:9222")
 
                 # Attach via CDP (reuse existing function from Sesi 5.8)
-                page = open_form_via_cdp(
-                    "http://127.0.0.1:9222", args.url
-                )
+                page = open_form_via_cdp("http://127.0.0.1:9222", args.url)
             except (BrowserError, ProfileError) as e:
                 print(f"Browser setup failed: {e}", file=sys.stderr)
                 return 2

@@ -349,7 +349,9 @@ def fill_answers(page: Page, questions: list[Question], answers: list[Answer]) -
         if q.index >= len(items):
             logger.warning(
                 "Q%d index %d out of DOM range (len=%d) — skipping",
-                q.index, q.index, len(items),
+                q.index,
+                q.index,
+                len(items),
             )
             continue
         a = answers_by_index.get(q.index)
@@ -359,7 +361,9 @@ def fill_answers(page: Page, questions: list[Question], answers: list[Answer]) -
         if a.needs_cli or not a.value:
             logger.debug(
                 "Skip Q%d (needs_cli=%s, value=%r)",
-                q.index, a.needs_cli, a.value,
+                q.index,
+                a.needs_cli,
+                a.value,
             )
             continue
         item = items[q.index]

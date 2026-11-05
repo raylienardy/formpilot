@@ -35,10 +35,10 @@ class BrowserError(Exception):
 class BrowserInfo:
     """Detected browser metadata."""
 
-    name: str          # "edge", "chrome", "brave", "chromium", "vivaldi"
+    name: str  # "edge", "chrome", "brave", "chromium", "vivaldi"
     display_name: str  # "Microsoft Edge"
-    executable: Path   # Full path to exe
-    priority: int      # 1=highest (Edge), 5=lowest (Vivaldi)
+    executable: Path  # Full path to exe
+    priority: int  # 1=highest (Edge), 5=lowest (Vivaldi)
 
 
 # Standard install locations per OS (Windows-first, macOS/Linux stubs)
@@ -168,8 +168,7 @@ def pick_browser(
                 console.print(f"[green]Using preferred browser:[/green] {b.display_name}")
                 return b
         console.print(
-            f"[yellow]Preferred '{preferred}' not installed, "
-            f"falling back to menu.[/yellow]"
+            f"[yellow]Preferred '{preferred}' not installed, falling back to menu.[/yellow]"
         )
 
     # Single browser: use without prompt
@@ -244,8 +243,7 @@ def resolve_browser_from_arg(
         if b.name == value.lower():
             return b
     raise BrowserError(
-        f"Browser '{value}' not found. Installed: "
-        f"{[b.name for b in browsers] or 'none'}"
+        f"Browser '{value}' not found. Installed: {[b.name for b in browsers] or 'none'}"
     )
 
 
@@ -275,11 +273,18 @@ def launch_browser(
         f"--user-data-dir={profile_path}",
         "--no-first-run",
         "--no-default-browser-check",
+        # Defensive: suppress recovery/welcome dialogs that block CDP
+        "--disable-session-crashed-bubble",
+        "--no-restore-session-state",
+        "--disable-features=msEdgeWelcome,EdgeCollections",
+        "--remote-allow-origins=*",
     ]
 
     logger.info(
         "Launching %s with profile %s on port %d",
-        browser.display_name, profile_path, debug_port,
+        browser.display_name,
+        profile_path,
+        debug_port,
     )
 
     try:
@@ -290,9 +295,7 @@ def launch_browser(
         )
         return proc
     except OSError as e:
-        raise BrowserError(
-            f"Failed to launch {browser.display_name}: {e}"
-        ) from e
+        raise BrowserError(f"Failed to launch {browser.display_name}: {e}") from e
 
 
 def is_browser_running(browser: BrowserInfo) -> bool:

@@ -13,7 +13,11 @@ browser:
   user_data_dir: "./state/browser_profile"
   timeout_ms: 30000
   preferred: null                     # null = auto-detect + menu; or "edge"|"chrome"|"brave"|"chromium"|"vivaldi"
-  profile_strategy: "ask"             # "existing" | "isolated" | "ask"
+  # Profile strategy:
+  #   "existing" = auto-snapshot real profile, instant login (recommended)
+  #   "isolated" = fresh profile, requires Google login once
+  #   "ask"      = prompt if browser running, default to existing if not
+  profile_strategy: "ask"
 
 memory:
   sqlite_path: "./memory.db"

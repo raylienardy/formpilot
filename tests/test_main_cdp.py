@@ -19,9 +19,12 @@ def _run_main(*args: str) -> subprocess.CompletedProcess:
 def test_account_requires_existing_profile():
     """--account with --profile isolated should fail fast."""
     result = _run_main(
-        "--url", "https://example.com",
-        "--profile", "isolated",
-        "--account", "test@example.com",
+        "--url",
+        "https://example.com",
+        "--profile",
+        "isolated",
+        "--account",
+        "test@example.com",
     )
     # Will fail before actually launching (during flag validation or account resolution)
     # Either exit code 2 with message, or exit code 1 (no browser)
@@ -35,10 +38,14 @@ def test_account_requires_existing_profile():
 def test_account_nonexistent_fails_gracefully():
     """--account with nonexistent email should fail with clear error."""
     result = _run_main(
-        "--url", "https://example.com",
-        "--browser", "edge",
-        "--profile", "existing",
-        "--account", "nonexistent-xyz@invalid-domain-xyz.test",
+        "--url",
+        "https://example.com",
+        "--browser",
+        "edge",
+        "--profile",
+        "existing",
+        "--account",
+        "nonexistent-xyz@invalid-domain-xyz.test",
     )
     # Should not crash with traceback
     assert "Traceback" not in result.stderr
