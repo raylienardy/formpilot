@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -10,8 +11,10 @@ from formpilot.browser_manager import (
     BrowserError,
     BrowserInfo,
     detect_browsers,
+    kill_browser,
     launch_browser,
     resolve_browser_from_arg,
+    wait_for_cdp_ready,
 )
 
 
@@ -102,3 +105,35 @@ def test_launch_browser_args_correct(tmp_path):
     assert str(fake_exe) in call_args
     assert "--remote-debugging-port=9999" in call_args
     assert f"--user-data-dir={profile}" in call_args
+
+
+def test_wait_for_cdp_ready_timeout():
+    """wait_for_cdp_ready returns False on unused port."""
+    result = wait_for_cdp_ready(port=59999, timeout_seconds=1)
+    assert result is False
+
+
+def test_kill_browser_not_running():
+    """kill_browser returns True if browser never running."""
+    fake_exe = Path(__file__) / "does-not-exist.exe"
+    browser = BrowserInfo(
+        name="custom",
+        display_name="Fake",
+        executable=fake_exe,
+        priority=99,
+    )
+    result = kill_browser(browser, timeout_seconds=1)
+    assert result is True
+
+
+def test_kill_browser_invalid_exe_name():
+    """kill_browser handles missing exe gracefully."""
+    fake_exe = Path("nonexistent-browser-test-xyz.exe")
+    browser = BrowserInfo(
+        name="custom",
+        display_name="Fake",
+        executable=fake_exe,
+        priority=99,
+    )
+    result = kill_browser(browser, timeout_seconds=1)
+    assert isinstance(result, bool)

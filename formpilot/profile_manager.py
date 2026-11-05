@@ -194,3 +194,108 @@ def resolve_profile(
         if raw == "3":
             raise ProfileError("User cancelled profile selection")
         console.print("[red]Pilihan tidak valid. Ketik 1-3.[/red]")
+
+
+def detect_google_accounts(browser: BrowserInfo) -> list[dict]:
+    """Detect Google accounts in existing profile folders.
+
+    Scans profile subdirs (Default, Profile 1, Profile 2, ...) and parses
+    Preferences JSON for account_info[].email entries.
+
+    Works only for existing profiles (not isolated). Returns empty list if
+    no existing profile dir or no accounts.
+
+    Args:
+        browser: BrowserInfo.
+
+    Returns:
+        List of dicts: [{"email": "...", "profile_dir": "Default"}, ...].
+        Empty if no accounts found.
+    """
+    import json
+
+    try:
+        base = get_existing_profile_path(browser)
+    except ProfileError:
+        return []
+
+    if not base.exists():
+        return []
+
+    accounts: list[dict] = []
+    for subdir in base.iterdir():
+        if not subdir.is_dir():
+            continue
+        # Profile folders are Default or "Profile N"
+        if subdir.name != "Default" and not subdir.name.startswith("Profile "):
+            continue
+
+        prefs_file = subdir / "Preferences"
+        if not prefs_file.exists():
+            continue
+
+        try:
+            data = json.loads(prefs_file.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError, OSError):
+            continue
+
+        # Chrome/Edge: preferences.account_info[].email
+        account_info = data.get("account_info", [])
+        for acct in account_info:
+            email = acct.get("email", "").strip()
+            if email and "@" in email:
+                accounts.append({
+                    "email": email,
+                    "profile_dir": subdir.name,
+                })
+
+    logger.debug("Detected %d accounts in %s profile", len(accounts), browser.name)
+    return accounts
+
+
+def resolve_account_profile(
+    browser: BrowserInfo,
+    email: str,
+    console: Console | None = None,
+) -> Path:
+    """Resolve profile subdir for a specific Google account email.
+
+    Args:
+        browser: BrowserInfo.
+        email: Google account email to find.
+        console: Optional Rich console.
+
+    Returns:
+        Path to profile subdir (e.g. User Data/Profile 1).
+
+    Raises:
+        ProfileError: If email not found in existing profile accounts.
+    """
+    if console is None:
+        console = Console()
+
+    accounts = detect_google_accounts(browser)
+    matches = [a for a in accounts if a["email"].lower() == email.lower()]
+
+    if not matches:
+        available = ", ".join(a["email"] for a in accounts) or "none"
+        raise ProfileError(
+            f"Account '{email}' not found in {browser.display_name} profile. "
+            f"Available: {available}"
+        )
+
+    if len(matches) > 1:
+        # Multiple profiles have same email — use first (rare)
+        logger.warning(
+            "Multiple profiles found for %s: %s, using first",
+            email, [m["profile_dir"] for m in matches],
+        )
+
+    matched = matches[0]
+    base = get_existing_profile_path(browser)
+    profile_path = base / matched["profile_dir"]
+    console.print(
+        f"[green]Using account:[/green] {email} "
+        f"[dim]({matched['profile_dir']})[/dim]"
+    )
+    return profile_path

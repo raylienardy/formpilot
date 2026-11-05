@@ -19,13 +19,20 @@ from rich.console import Console
 from formpilot.brain import BrainError, check_ollama_ready, resolve_questions
 from formpilot.browser_manager import (
     BrowserError,
+    kill_browser,
+    launch_browser,
     resolve_browser_from_arg,
+    wait_for_cdp_ready,
 )
 from formpilot.cli import prompt_for_answers
 from formpilot.memory.schema import Answer, FieldType, Question
 from formpilot.memory.sqlite_store import SqliteStore
 from formpilot.memory.vector_store import VectorStore
-from formpilot.profile_manager import ProfileError, resolve_profile
+from formpilot.profile_manager import (
+    ProfileError,
+    resolve_account_profile,
+    resolve_profile,
+)
 from formpilot.scraper import (
     click_next,
     close,
@@ -99,6 +106,16 @@ def main() -> int:
             "'ask' = prompt if browser running. Default: from config."
         ),
     )
+    parser.add_argument(
+        "--account",
+        default=None,
+        metavar="EMAIL",
+        help=(
+            "Google account email to use (for multi-account profiles). "
+            "Requires --profile existing or --profile ask with existing fallback. "
+            "Example: --account budi@gmail.com"
+        ),
+    )
     args = parser.parse_args()
 
     setup_logger("formpilot", level="INFO")
@@ -153,7 +170,7 @@ def main() -> int:
             logger.info("Using CDP mode: attaching to existing browser")
             page = open_form_via_cdp(args.cdp_url, args.url)
         elif args.browser or (config and config.browser.preferred) or args.profile:
-            # Browser manager path: user wants control over browser/profile
+            # Browser manager path: launch + attach via CDP
             _console = Console()
             try:
                 browser = resolve_browser_from_arg(
@@ -168,21 +185,64 @@ def main() -> int:
                     strategy=strategy,
                     console=_console,
                 )
+
+                # Handle relaunch: kill existing browser, wait, relaunch
                 if decision.needs_relaunch:
                     _console.print(
-                        "[yellow]Note: existing profile with browser running. "
-                        "You must manually close the browser before FormPilot "
-                        "can attach, or use --profile isolated.[/yellow]"
+                        "[yellow]Relaunching browser (closing existing "
+                        "windows)...[/yellow]"
                     )
-                # Set cdp_url to localhost:9222 (launch_browser already launched)
-                # For now, print path — full integration with scraper in v0.2-2
+                    if not kill_browser(browser):
+                        _console.print(
+                            "[red]Failed to close browser. Try manually.[/red]"
+                        )
+                        return 2
+
+                # Resolve account if --account specified
+                profile_path = decision.path
+                if args.account:
+                    # Only works with existing profile dir
+                    if decision.strategy == "isolated":
+                        print(
+                            "--account requires --profile existing or ask (not isolated)",
+                            file=sys.stderr,
+                        )
+                        return 2
+                    try:
+                        profile_path = resolve_account_profile(
+                            browser, args.account, console=_console,
+                        )
+                    except ProfileError as e:
+                        print(f"Account resolution failed: {e}", file=sys.stderr)
+                        return 2
+
+                # Launch browser with selected profile
                 _console.print(
-                    f"[green]Browser ready:[/green] {browser.display_name}\n"
-                    f"[green]Profile:[/green] {decision.path}\n"
-                    f"[dim]CDP integration in v0.2-2[/dim]"
+                    f"[cyan]Launching {browser.display_name}...[/cyan]"
                 )
-                # Fallback to standard open_form for now
-                page = open_form(args.url, headless=not args.headed)
+                launch_browser(
+                    browser,
+                    profile_path,
+                    debug_port=9222,
+                )
+
+                # Wait for CDP endpoint
+                _console.print("[cyan]Waiting for browser ready...[/cyan]")
+                if not wait_for_cdp_ready(port=9222, timeout_seconds=30):
+                    _console.print(
+                        "[red]Browser did not become ready (CDP timeout).[/red]"
+                    )
+                    return 2
+
+                _console.print(
+                    "[green]Attached via CDP:[/green] "
+                    "http://127.0.0.1:9222"
+                )
+
+                # Attach via CDP (reuse existing function from Sesi 5.8)
+                page = open_form_via_cdp(
+                    "http://127.0.0.1:9222", args.url
+                )
             except (BrowserError, ProfileError) as e:
                 print(f"Browser setup failed: {e}", file=sys.stderr)
                 return 2

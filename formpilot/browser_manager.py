@@ -328,3 +328,101 @@ def is_browser_running(browser: BrowserInfo) -> bool:
     except (subprocess.SubprocessError, FileNotFoundError):
         logger.warning("Cannot check browser process status, assuming not running")
         return False
+
+
+def wait_for_cdp_ready(
+    port: int = DEFAULT_DEBUG_PORT,
+    timeout_seconds: int = 30,
+    poll_interval_seconds: float = 0.5,
+) -> bool:
+    """Wait for CDP endpoint to become available on localhost:port.
+
+    Polls http://127.0.0.1:{port}/json/version until HTTP 200 or timeout.
+
+    Args:
+        port: CDP debug port.
+        timeout_seconds: Max wait time.
+        poll_interval_seconds: Time between polls.
+
+    Returns:
+        True if CDP ready, False if timeout.
+    """
+    import time
+    import urllib.error
+    import urllib.request
+
+    url = f"http://127.0.0.1:{port}/json/version"
+    deadline = time.time() + timeout_seconds
+    attempt = 0
+
+    logger.info("Waiting for CDP on %s (timeout %ds)...", url, timeout_seconds)
+
+    while time.time() < deadline:
+        attempt += 1
+        try:
+            with urllib.request.urlopen(url, timeout=2) as response:
+                if response.status == 200:
+                    logger.info("CDP ready after %d attempts", attempt)
+                    return True
+        except (urllib.error.URLError, ConnectionError, OSError):
+            pass
+        time.sleep(poll_interval_seconds)
+
+    logger.error("CDP not ready after %ds (%d attempts)", timeout_seconds, attempt)
+    return False
+
+
+def kill_browser(
+    browser: BrowserInfo,
+    timeout_seconds: int = 10,
+) -> bool:
+    """Kill all running processes of a browser (all windows).
+
+    WARNING: This closes ALL windows/tabs of the browser. User data
+    (history, open tabs) is preserved in profile, but unsaved work in
+    tabs may be lost.
+
+    Args:
+        browser: BrowserInfo of browser to kill.
+        timeout_seconds: Max time to wait for processes to exit.
+
+    Returns:
+        True if browser is no longer running (was killed or never running).
+        False if processes remain after timeout.
+    """
+    import time
+
+    if not is_browser_running(browser):
+        logger.debug("%s not running, nothing to kill", browser.name)
+        return True
+
+    exe_name = browser.executable.name
+    logger.warning("Killing %s (all windows will close)", browser.display_name)
+
+    try:
+        if sys.platform.startswith("win"):
+            subprocess.run(
+                ["taskkill", "/F", "/IM", exe_name],
+                capture_output=True,
+                timeout=10,
+            )
+        else:
+            subprocess.run(
+                ["pkill", "-f", exe_name],
+                capture_output=True,
+                timeout=10,
+            )
+    except (subprocess.SubprocessError, FileNotFoundError) as e:
+        logger.error("Failed to kill %s: %s", browser.display_name, e)
+        return False
+
+    # Wait for processes to actually exit (Windows can be slow)
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        if not is_browser_running(browser):
+            logger.info("%s killed successfully", browser.display_name)
+            return True
+        time.sleep(0.5)
+
+    logger.error("%s still running after %ds", browser.display_name, timeout_seconds)
+    return False
